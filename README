@@ -1,0 +1,21 @@
+Density of events around objects
+
+== Build ==
+
+$ make
+
+or
+
+$ make DEBUG=1
+
+== Run ==
+
+# bin size: 100bp
+# number of bins either side of objects: 200
+
+$ ./density_around 100 200 objects.csv events.csv
+
+== Development ==
+
+Short term goals
+- add option to output density rather than counts
