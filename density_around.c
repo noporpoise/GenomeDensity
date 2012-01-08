@@ -23,6 +23,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
+#include <limits.h>
 
 #include "string_buffer.h"
 #include "utility_lib.h"
@@ -101,6 +102,8 @@ int main(int argc, char* argv[])
   char *objects_file_path, *events_file_path;
   char *output_path;
 
+  char *bin_denom_path = NULL;
+
   long region_start = 0, region_end = 0;
   FILE* bin_count_out = NULL;
 
@@ -108,6 +111,8 @@ int main(int argc, char* argv[])
 
   if(argc == 10)
   {
+    bin_denom_path = argv[4];
+
     if(strcasecmp(argv[1], "--density") != 0)
     {
       fprintf(stderr, "Error: unknown arg (expected --length) '%s'\n", argv[1]);
@@ -127,7 +132,7 @@ int main(int argc, char* argv[])
     {
       print_usage("region start must be less than the region end\n");
     }
-    else if((bin_count_out = fopen(argv[4], "w")) == NULL)
+    else if((bin_count_out = fopen(bin_denom_path, "w")) == NULL)
     {
       fprintf(stderr, "Error: Cannot open output file '%s'\n", argv[4]);
       print_usage(NULL);
@@ -201,10 +206,13 @@ int main(int argc, char* argv[])
   unsigned long line_num;
   char seen_header = 0;
 
-  for(line_num = 0;
+  for(line_num = 1;
       (read_length = string_buff_reset_readline(events_line, events_file)) > 0;
       line_num++)
   {
+    string_buff_chomp(events_line);
+    //printf("reading events %lu '%s'\n", read_length, events_line->buff);
+
     // Check if comment line
     if(events_line->buff[0] != '#' &&
        !string_is_all_whitespace(events_line->buff))
@@ -220,6 +228,9 @@ int main(int argc, char* argv[])
 
       char* start_num_str = events_line->buff;
       char* end_num_str = separator+1;
+
+      //printf("%s:%lu - '%s' , '%s'\n", events_file_path, line_num,
+      //       start_num_str, end_num_str);
 
       long event_start, event_end;
 
@@ -315,12 +326,16 @@ int main(int argc, char* argv[])
 
   seen_header = 0;
 
-  for(line_num = 0;
+  for(line_num = 1;
       (read_length = string_buff_reset_readline(objects_line, objects_file)) > 0;
       line_num++)
   {
+    string_buff_chomp(objects_line);
+    //printf("reading objects %lu '%s'\n", read_length, objects_line->buff);
+
     // Check if comment line
-    if(objects_line->buff[0] != '#' &&
+    if(objects_line->len > 0 &&
+       objects_line->buff[0] != '#' &&
        !string_is_all_whitespace(objects_line->buff))
     {
       char* separator = strchr(objects_line->buff, ',');
@@ -328,6 +343,14 @@ int main(int argc, char* argv[])
       if(separator == NULL)
       {
         separator = strchr(objects_line->buff, '\t');
+      }
+
+      if(separator == NULL)
+      {
+        fprintf(stderr, "Error (file: %s line: %lu): no separator found "
+                        "(tab or comma only)\n",
+                objects_file_path, line_num);
+        print_usage(NULL);
       }
 
       *separator = '\0';
@@ -344,8 +367,8 @@ int main(int argc, char* argv[])
       if(!successs && seen_header)
       {
         // Error
-        fprintf(stderr, "Error on line: %lu file: %s\n",
-                line_num, objects_file_path);
+        fprintf(stderr, "Error (file: %s line: %lu): not valid numbers\n",
+                objects_file_path, line_num);
         print_usage(NULL);
       }
 
@@ -428,8 +451,10 @@ int main(int argc, char* argv[])
 
   string_buff_free(objects_line);
 
-  // Print
-  for (i = num_of_bins-1; i >= 0; i--)
+  printf("Saving bin counts to file: %s\n", output_path);
+
+  // Have to use < ULONG_MAX instead of >=0 since we're using unsigned longs
+  for (i = num_of_bins-1; i < ULONG_MAX; i--)
   {
     fprintf(out, "%f,%lu\n", -(i+0.5)*bin_size, bins_left[i]);
   }
@@ -446,7 +471,10 @@ int main(int argc, char* argv[])
   if(bin_count_out != NULL)
   {
     // Save bin denominators
-    for (i = num_of_bins-1; i >= 0; i--)
+    printf("Saving bin denominators to file: %s\n", bin_denom_path);
+
+    // Have to use < ULONG_MAX instead of >=0 since we're using unsigned longs
+    for (i = num_of_bins-1; i < ULONG_MAX; i--)
     {
       fprintf(bin_count_out, "%f,%f\n", -(i+0.5)*bin_size,
               bins_left_denom[i] + bins_left_denom_all);
