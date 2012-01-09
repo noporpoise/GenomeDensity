@@ -18,4 +18,5 @@ $ ./density_around 100 200 objects.csv events.csv
 == Development ==
 
 Short term goals
-- add option to output density rather than counts
+- add binary search ?
+- none - please suggest some

@@ -33,7 +33,31 @@ typedef unsigned long bin_t;
 // For this run
 char* cmd;
 
+// Command line arguments
 unsigned long bin_size, num_of_bins;
+char *objects_file_path, *events_file_path;
+
+// Optional cmdline args
+char *bin_denom_path = NULL;
+FILE* bin_count_out = NULL;
+long region_start = 0, region_end = 0;
+
+// Events data
+unsigned long num_of_events = 0;
+unsigned long events_arr_capacity = 500000;
+long *event_starts, *event_ends;
+unsigned long sum_event_lengths = 0;
+
+double mean_event_length;
+
+// Bin results
+bin_t num_events_overlapping_objects = 0;
+bin_t *bins_left, *bins_right;
+
+// Denominator results
+double object_overlap_bin = 0;
+double *bins_left_denom = NULL, *bins_right_denom = NULL;
+unsigned long bins_left_denom_all = 0, bins_right_denom_all = 0;
 
 void print_usage(char* err_msg)
 {
@@ -42,8 +66,8 @@ void print_usage(char* err_msg)
     fprintf(stderr, "Error: %s\n", err_msg);
   }
 
-  fprintf(stderr, "usage: %s [OPTIONS] <bin_size> <num_of_bins> <objects.csv> "
-                  "<events.csv> <out.csv>\n", cmd);
+  fprintf(stderr, "usage: %s [OPTIONS] <bin_size> <num_of_bins> <events.csv> "
+                  "<objects.csv> <out.csv>\n", cmd);
   fprintf(stderr, "  Histogram of density of events around objects\n");
   fprintf(stderr, "\n");
   fprintf(stderr, "  - objects and events must be sorted csv files "
@@ -52,7 +76,7 @@ void print_usage(char* err_msg)
   fprintf(stderr, "  - num_of_bins is the number of bins either side\n");
   fprintf(stderr, "\n");
   fprintf(stderr, "  OPTIONS:\n");
-  fprintf(stderr, "    --density <start> <end> <bin_count.csv>\n");
+  fprintf(stderr, "    --density <start> <end> <denominators.csv>\n");
   fprintf(stderr, "    If specified will give counts of bin occurance, required\n");
   fprintf(stderr, "    to calculate actual event density around objects (e.g.\n");
   fprintf(stderr, "    '--density 1 2000000 chr1.csv' for a chromosome)\n");
@@ -63,6 +87,7 @@ void print_usage(char* err_msg)
   exit(EXIT_FAILURE);
 }
 
+// Update bin denominators
 inline void update_bin_denoms(unsigned long *all_bins_denom, double *bins_denom,
                               const long remaining)
 {
@@ -84,133 +109,39 @@ inline void update_bin_denoms(unsigned long *all_bins_denom, double *bins_denom,
   }
 }
 
-int main(int argc, char* argv[])
+void load_all_events(gzFile* events_file, char reading_from_stdin)
 {
-  cmd = argv[0];
-
-  #ifdef DEBUG
-  printf("DEBUG: on\n");
-  #endif
-
-  if(argc != 6 && argc != 10)
-  {
-    print_usage(NULL);
-  }
-
-  // Command line args
-  char *bin_size_arg, *num_of_bins_arg;
-  char *objects_file_path, *events_file_path;
-  char *output_path;
-
-  char *bin_denom_path = NULL;
-
-  long region_start = 0, region_end = 0;
-  FILE* bin_count_out = NULL;
-
-  int argi = 1;
-
-  if(argc == 10)
-  {
-    bin_denom_path = argv[4];
-
-    if(strcasecmp(argv[1], "--density") != 0)
-    {
-      fprintf(stderr, "Error: unknown arg (expected --length) '%s'\n", argv[1]);
-      print_usage(NULL);
-    }
-    else if(!parse_entire_long(argv[2], &region_start))
-    {
-      fprintf(stderr, "Error: Invalid region start arg '%s'\n", argv[2]);
-      print_usage(NULL);
-    }
-    else if(!parse_entire_long(argv[3], &region_end))
-    {
-      fprintf(stderr, "Error: Invalid region end arg '%s'\n", argv[3]);
-      print_usage(NULL);
-    }
-    else if(region_start >= region_end)
-    {
-      print_usage("region start must be less than the region end\n");
-    }
-    else if((bin_count_out = fopen(bin_denom_path, "w")) == NULL)
-    {
-      fprintf(stderr, "Error: Cannot open output file '%s'\n", argv[4]);
-      print_usage(NULL);
-    }
-
-    // start reading arguments from argv[5]
-    argi = 5;
-  }
-  else
-  {
-    // Start reading arguments from argv[1]
-    argi = 1;
-  }
-  
-  bin_size_arg = argv[argi++];
-  num_of_bins_arg = argv[argi++];
-  objects_file_path = argv[argi++];
-  events_file_path = argv[argi++];
-  output_path = argv[argi++];
-
-  // Parse bin size, max bin numbers
-  if(!parse_entire_ulong(bin_size_arg, &bin_size) || bin_size <= 0)
-  {
-    print_usage("Invalid <bin_size> argument");
-  }
-
-  if(!parse_entire_ulong(num_of_bins_arg, &num_of_bins) || num_of_bins <= 0)
-  {
-    print_usage("Invalid <num_of_bins> argument");
-  }
-
-  // Open input files
-  gzFile* objects_file = gzopen(objects_file_path, "r");
-  gzFile* events_file = gzopen(events_file_path, "r");
-
-  if(objects_file == NULL)
-  {
-    fprintf(stderr, "Error: Cannot open objects file '%s'\n", objects_file_path);
-    print_usage(NULL);
-  }
-  
-  if(events_file == NULL)
-  {
-    fprintf(stderr, "Error: Cannot open events file '%s'\n", events_file_path);
-    print_usage(NULL);
-  }
-
-  // Open output file
-  FILE* out = fopen(output_path, "w");
-
-  //
-  // Load all events
-  //
-  
-  // Initialise array to hold events
-  unsigned long num_of_events = 0;
-  unsigned long events_arr_capacity = 500000;
-  long *event_starts = (long*) malloc(events_arr_capacity * sizeof(long));
-  long *event_ends = (long*) malloc(events_arr_capacity * sizeof(long));
-
-  unsigned long sum_event_lengths = 0;
-
-  if(event_starts == NULL || event_ends == NULL)
-  {
-    print_usage("Not enough memory to read in events!");
-  }
-
   STRING_BUFFER* events_line = string_buff_init(200);
 
   t_buf_pos read_length;
   unsigned long line_num;
   char seen_header = 0;
+  char prev_line_emtpy = 0;
 
   for(line_num = 1;
       (read_length = string_buff_reset_readline(events_line, events_file)) > 0;
       line_num++)
   {
     string_buff_chomp(events_line);
+
+    // Look for two empty lines in a row to mark end of events input
+    if(reading_from_stdin)
+    {
+      if(strlen(events_line->buff) == 0)
+      {
+        if(prev_line_emtpy == 1)
+        {
+          break;
+        }
+
+        prev_line_emtpy = 1;
+      }
+      else
+      {
+        prev_line_emtpy = 0;
+      }
+    }
+
     //printf("reading events %lu '%s'\n", read_length, events_line->buff);
 
     // Check if comment line
@@ -224,10 +155,18 @@ int main(int argc, char* argv[])
         separator = strchr(events_line->buff, '\t');
       }
 
+      if(separator == NULL)
+      {
+        fprintf(stderr, "Error (file: %s line: %lu): no separator found "
+                        "(tab or comma only)\n",
+                objects_file_path, line_num);
+        print_usage(NULL);
+      }
+
       *separator = '\0';
 
-      char* start_num_str = events_line->buff;
-      char* end_num_str = separator+1;
+      char* start_num_str = trim(events_line->buff);
+      char* end_num_str = trim(separator+1);
 
       //printf("%s:%lu - '%s' , '%s'\n", events_file_path, line_num,
       //       start_num_str, end_num_str);
@@ -275,56 +214,16 @@ int main(int argc, char* argv[])
     }
   }
 
-  double mean_event_length
-    = (num_of_events == 0) ? 0 : sum_event_lengths / num_of_events;
-  
   string_buff_free(events_line);
+}
 
-  printf("Loaded %lu events\n", num_of_events);
-  printf("Mean event length %f\n", mean_event_length);
-
-  // Create bins
-  bin_t num_events_overlapping_objects = 0;
-  bin_t *bins_left = (bin_t*) malloc(num_of_bins * sizeof(bin_t));
-  bin_t *bins_right = (bin_t*) malloc(num_of_bins * sizeof(bin_t));
-
-  if(bins_left == NULL || bins_right == NULL)
-  {
-    print_usage("Not enough memory to allocate bin arrays!");
-  }
-
-  // Initialise bins to zero
-  unsigned long i;
-  for (i = 0; i < num_of_bins; i++)
-  {
-    bins_left[i] = 0;
-    bins_right[i] = 0;
-  }
-
-  double *bins_left_denom = NULL, *bins_right_denom = NULL;
-  // Counts to all to all bins
-  unsigned long bins_left_denom_all = 0, bins_right_denom_all = 0;
-  double object_overlap_bin = 0;
-
-  if(bin_count_out != NULL)
-  {
-    bins_left_denom = (double*) malloc(num_of_bins * sizeof(double));
-    bins_right_denom = (double*) malloc(num_of_bins * sizeof(double));
-
-    for(i = 0; i < num_of_bins; i++)
-    {
-      bins_left_denom[i] = 0;
-      bins_right_denom[i] = 0;
-    }
-  }
-
-  //
-  // Read objects one at a time 
-  //
-  
+void run_through_objects(gzFile* objects_file)
+{
   STRING_BUFFER* objects_line = string_buff_init(200);
 
-  seen_header = 0;
+  t_buf_pos read_length;
+  unsigned long line_num;
+  char seen_header = 0;
 
   for(line_num = 1;
       (read_length = string_buff_reset_readline(objects_line, objects_file)) > 0;
@@ -355,8 +254,8 @@ int main(int argc, char* argv[])
 
       *separator = '\0';
 
-      char* start_num_str = objects_line->buff;
-      char* end_num_str = separator+1;
+      char* start_num_str = trim(objects_line->buff);
+      char* end_num_str = trim(separator+1);
 
       long obj_start, obj_end;
 
@@ -394,8 +293,7 @@ int main(int argc, char* argv[])
           }
           else
           {
-            object_overlap_bin += obj_end - obj_start +
-                                  2 * (mean_event_length - 1);
+            object_overlap_bin += obj_end - obj_start + 2 * mean_event_length;
 
             long left_remaining = obj_start - region_start;
 
@@ -407,7 +305,7 @@ int main(int argc, char* argv[])
             update_bin_denoms(&bins_right_denom_all, bins_right_denom,
                               right_remaining);
           }
-        }
+        } // done updating bin denominators
 
         // Loop through events, updating bins using position start, end
         unsigned long events_i;
@@ -422,18 +320,7 @@ int main(int argc, char* argv[])
           {
             num_events_overlapping_objects++;
           }
-          else if(obj_start > event_end)
-          {
-            // Event to the right of the object
-            long dist = obj_start - event_end;
-            bin_t bin = dist % bin_size;
-
-            if(bin < num_of_bins)
-            {
-              bins_right[bin]++;
-            }
-          }
-          else
+          else if(event_end < obj_start)
           {
             // Event to the left of the object
             long dist = event_start - obj_end;
@@ -444,14 +331,219 @@ int main(int argc, char* argv[])
               bins_left[bin]++;
             }
           }
+          else
+          {
+            // Event to the right of the object
+            long dist = obj_start - event_end;
+            bin_t bin = dist % bin_size;
+
+            if(bin < num_of_bins)
+            {
+              bins_right[bin]++;
+            }
+          }
         } // loop over events
       } // if(success)
     } // if(!comment && !whitespace)
   } // loop over objects
 
   string_buff_free(objects_line);
+}
 
-  printf("Saving bin counts to file: %s\n", output_path);
+int main(int argc, char* argv[])
+{
+  cmd = argv[0];
+
+  #ifdef DEBUG
+  printf("DEBUG: on\n");
+  #endif
+
+  if(argc != 6 && argc != 10)
+  {
+    print_usage(NULL);
+  }
+
+  // Parse command line args
+  int argi = 1;
+
+  if(argc == 10)
+  {
+    if(strcasecmp(argv[1], "--density") != 0)
+    {
+      fprintf(stderr, "Error: unknown arg (expected --length) '%s'\n", argv[1]);
+      print_usage(NULL);
+    }
+    else if(!parse_entire_long(argv[2], &region_start))
+    {
+      fprintf(stderr, "Error: Invalid region start arg '%s'\n", argv[2]);
+      print_usage(NULL);
+    }
+    else if(!parse_entire_long(argv[3], &region_end))
+    {
+      fprintf(stderr, "Error: Invalid region end arg '%s'\n", argv[3]);
+      print_usage(NULL);
+    }
+    else if(region_start >= region_end)
+    {
+      print_usage("region start must be less than the region end\n");
+    }
+
+    bin_denom_path = argv[4];
+
+    if(strcmp(bin_denom_path,"-") == 0)
+    {
+      bin_count_out = stdout;
+    }
+    else
+    {
+      bin_count_out = fopen(bin_denom_path, "w");
+    }
+
+    if(bin_count_out == NULL)
+    {
+      fprintf(stderr, "Error: Cannot open output file '%s'\n", argv[4]);
+      print_usage(NULL);
+    }
+
+    // start reading arguments from argv[5]
+    argi = 5;
+  }
+  else
+  {
+    // Start reading arguments from argv[1]
+    argi = 1;
+  }
+  
+  char* bin_size_arg = argv[argi++];
+  char* num_of_bins_arg = argv[argi++];
+  objects_file_path = argv[argi++];
+  events_file_path = argv[argi++];
+  char* output_path = argv[argi++];
+
+  // Parse bin size, max bin numbers
+  if(!parse_entire_ulong(bin_size_arg, &bin_size) || bin_size <= 0)
+  {
+    print_usage("Invalid <bin_size> argument");
+  }
+
+  if(!parse_entire_ulong(num_of_bins_arg, &num_of_bins) || num_of_bins <= 0)
+  {
+    print_usage("Invalid <num_of_bins> argument");
+  }
+
+  // Open input files
+  gzFile *stdin_file = NULL, *events_file = NULL, *objects_file = NULL;
+
+  if(strcmp(events_file_path, "-") == 0 && strcmp(objects_file_path ,"-") == 0)
+  {
+    // Open stdin
+    stdin_file = gzdopen(fileno(stdin), "r");
+  }
+  else
+  {
+    events_file = gzopen(events_file_path, "r");
+    objects_file = gzopen(objects_file_path, "r");
+  
+    if(events_file == NULL)
+    {
+      fprintf(stderr, "Error: Cannot open events file '%s'\n", events_file_path);
+      print_usage(NULL);
+    }
+
+    if(objects_file == NULL)
+    {
+      fprintf(stderr, "Error: Cannot open objects file '%s'\n", objects_file_path);
+      print_usage(NULL);
+    }
+  }
+
+  // Open output file
+  FILE* out;
+  
+  if(strcmp(output_path, "-") == 0)
+  {
+    out = stdout;
+  }
+  else
+  {
+    out = fopen(output_path, "w");
+  }
+
+
+  //
+  // Load all events
+  //
+  
+  // Initialise array to hold events
+  num_of_events = 0;
+  events_arr_capacity = 500000;
+  event_starts = (long*) malloc(events_arr_capacity * sizeof(long));
+  event_ends = (long*) malloc(events_arr_capacity * sizeof(long));
+
+  sum_event_lengths = 0;
+
+  if(event_starts == NULL || event_ends == NULL)
+  {
+    print_usage("Not enough memory to read in events!");
+  }
+
+  if(stdin_file != NULL)
+  {
+    load_all_events(stdin_file, 1);
+  }
+  else
+  {
+    load_all_events(events_file, 0);
+  }
+
+  mean_event_length = (num_of_events == 0) ? 0 : sum_event_lengths / num_of_events;
+
+  if(out != stdout || 1)
+  {
+    printf("Loaded %lu events\n", num_of_events);
+    printf("Mean event length %f\n", mean_event_length);
+  }
+
+  // Create bins
+  num_events_overlapping_objects = 0;
+  bins_left = (bin_t*) malloc(num_of_bins * sizeof(bin_t));
+  bins_right = (bin_t*) malloc(num_of_bins * sizeof(bin_t));
+
+  if(bins_left == NULL || bins_right == NULL)
+  {
+    print_usage("Not enough memory to allocate bin arrays!");
+  }
+
+  // Initialise bins to zero
+  unsigned long i;
+  for (i = 0; i < num_of_bins; i++)
+  {
+    bins_left[i] = 0;
+    bins_right[i] = 0;
+  }
+
+  if(bin_count_out != NULL)
+  {
+    bins_left_denom = (double*) malloc(num_of_bins * sizeof(double));
+    bins_right_denom = (double*) malloc(num_of_bins * sizeof(double));
+
+    for(i = 0; i < num_of_bins; i++)
+    {
+      bins_left_denom[i] = 0;
+      bins_right_denom[i] = 0;
+    }
+  }
+
+  //
+  // Read objects one at a time 
+  //
+  
+  run_through_objects(objects_file != NULL ? objects_file : stdin_file);
+
+  if(out != stdout || 1)
+  {
+    printf("Saving bin counts to file: %s\n", output_path);
+  }
 
   // Have to use < ULONG_MAX instead of >=0 since we're using unsigned longs
   for (i = num_of_bins-1; i < ULONG_MAX; i--)
@@ -466,12 +558,24 @@ int main(int argc, char* argv[])
     fprintf(out, "%f,%lu\n", (i+0.5)*bin_size, bins_right[i]);
   }
 
-  fclose(out);
+  if(out != stdout)
+  {
+    fclose(out);
+  }
 
   if(bin_count_out != NULL)
   {
     // Save bin denominators
-    printf("Saving bin denominators to file: %s\n", bin_denom_path);
+
+    if(bin_count_out == stdout)
+    {
+      // Print separator
+      printf("\n\n");
+    }
+    else
+    {
+      printf("Saving bin denominators to file: %s\n", bin_denom_path);
+    }
 
     // Have to use < ULONG_MAX instead of >=0 since we're using unsigned longs
     for (i = num_of_bins-1; i < ULONG_MAX; i--)
@@ -489,8 +593,15 @@ int main(int argc, char* argv[])
     }
   }
 
-  gzclose(events_file);
-  gzclose(objects_file);
+  if(stdin_file != NULL)
+  {
+    gzclose(stdin_file);
+  }
+  else
+  {
+    gzclose(events_file);
+    gzclose(objects_file);
+  }
 
   return EXIT_SUCCESS;
 }
