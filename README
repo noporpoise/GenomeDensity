@@ -18,5 +18,10 @@ $ ./density_around 100 200 objects.csv events.csv
 == Development ==
 
 Short term goals
-- add binary search ?
 - none - please suggest some
+
+long term
+- add binary search ?
+  * sort start positions
+  * sort end positions
+  * binary search to find start position in both arrays when looping
