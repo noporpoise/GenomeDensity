@@ -37,24 +37,20 @@ char* cmd;
 unsigned long bin_size, num_of_bins;
 char *objects_file_path, *events_file_path;
 
-// Optional cmdline args
-char *bin_denom_path = NULL;
-FILE* bin_count_out = NULL;
-long region_start = 0, region_end = 0;
-
 // Events data
 unsigned long num_of_events = 0;
 unsigned long events_arr_capacity = 500000;
-long *event_starts, *event_ends;
-unsigned long sum_event_lengths = 0;
+long *event_positions;
 
-double mean_event_length;
+// Object data
+unsigned long num_of_objects = 0;
 
 // Bin results
 bin_t num_events_overlapping_objects = 0;
 bin_t *bins_left, *bins_right;
 
-// Denominator results
+// Denominotor results - optional
+long region_start = 0, region_end = 0; // from cmdline args
 double object_overlap_bin = 0;
 double *bins_left_denom = NULL, *bins_right_denom = NULL;
 unsigned long bins_left_denom_all = 0, bins_right_denom_all = 0;
@@ -68,28 +64,29 @@ void print_usage(char* err_msg)
 
   fprintf(stderr, "usage: %s [OPTIONS] <bin_size> <num_of_bins> <events.csv> "
                   "<objects.csv> <out.csv>\n", cmd);
-  fprintf(stderr, "  Histogram of density of events around objects\n");
-  fprintf(stderr, "\n");
-  fprintf(stderr, "  - objects and events must be sorted csv files "
-                  "each line reading: 'start,end'\n");
-  fprintf(stderr, "  - bin_size is the width of the bins\n");
-  fprintf(stderr, "  - num_of_bins is the number of bins either side\n");
-  fprintf(stderr, "\n");
-  fprintf(stderr, "  OPTIONS:\n");
-  fprintf(stderr, "    --density <start> <end> <denominators.csv>\n");
-  fprintf(stderr, "    If specified will give counts of bin occurance, required\n");
-  fprintf(stderr, "    to calculate actual event density around objects (e.g.\n");
-  fprintf(stderr, "    '--density 1 2000000 chr1.csv' for a chromosome)\n");
-  fprintf(stderr, "\n");
-  
-  fprintf(stderr, "  turner.isaac@gmail.com  06 Jan 2012\n");
+
+  fprintf(stderr,
+"  Histogram of density of events around objects\n"
+"\n"
+"  - objects must be sorted csv files each line reading: 'start,end'\n"
+"  - events must be a csv each line containing a single integer\n"
+"  - bin_size is the width of the bins\n"
+"  - num_of_bins is the number of bins either side\n"
+"\n"
+"  OPTIONS:\n"
+"    --density <start> <end>\n"
+"    If specified will give counts of bin occurance, required to calculate\n"
+"    actual event density around objects\n"
+"    (e.g. '--density 1 2000000 chr1.csv' for a chromosome)\n"
+"\n"
+"  turner.isaac@gmail.com  (compiled: "COMPILE_TIME")\n");
 
   exit(EXIT_FAILURE);
 }
 
 // Update bin denominators
-inline void update_bin_denoms(unsigned long *all_bins_denom, double *bins_denom,
-                              const long remaining)
+void update_bin_denoms(unsigned long *all_bins_denom, double *bins_denom,
+                       const long remaining)
 {
   unsigned long last_bin_index = remaining / bin_size;
 
@@ -115,11 +112,10 @@ void load_all_events(gzFile* events_file, char reading_from_stdin)
 
   t_buf_pos read_length;
   unsigned long line_num;
-  char seen_header = 0;
   char prev_line_emtpy = 0;
 
   for(line_num = 1;
-      (read_length = string_buff_reset_readline(events_line, events_file)) > 0;
+      (read_length = string_buff_reset_gzreadline(events_line, events_file)) > 0;
       line_num++)
   {
     string_buff_chomp(events_line);
@@ -148,73 +144,97 @@ void load_all_events(gzFile* events_file, char reading_from_stdin)
     if(events_line->buff[0] != '#' &&
        !string_is_all_whitespace(events_line->buff))
     {
-      char* separator = strchr(events_line->buff, ',');
-      
-      if(separator == NULL)
-      {
-        separator = strchr(events_line->buff, '\t');
-      }
+      long event_position;
 
-      if(separator == NULL)
+      if(!parse_entire_long(events_line->buff, &event_position))
       {
-        fprintf(stderr, "Error (file: %s line: %lu): no separator found "
-                        "(tab or comma only)\n",
-                objects_file_path, line_num);
+        // Error
+        fprintf(stderr, "Events Error on line: %lu file: %s\n",
+                line_num, events_file_path);
         print_usage(NULL);
       }
-
-      *separator = '\0';
-
-      char* start_num_str = trim(events_line->buff);
-      char* end_num_str = trim(separator+1);
-
-      //printf("%s:%lu - '%s' , '%s'\n", events_file_path, line_num,
-      //       start_num_str, end_num_str);
-
-      long event_start, event_end;
-
-      char successs = (parse_entire_long(start_num_str, &event_start) &&
-                       parse_entire_long(end_num_str, &event_end) &&
-                       event_end >= event_start);
-
-      if(!successs)
-      {
-        if(num_of_events > 0 || seen_header)
-        {
-          // Error
-          fprintf(stderr, "Error on line: %lu file: %s\n",
-                  line_num, events_file_path);
-          print_usage(NULL);
-        }
-
-        // Everyone gets one
-        seen_header = 1;
-      }
-      else
-      {
-        sum_event_lengths += event_end - event_start;
-
-        if(num_of_events + 1 == events_arr_capacity)
-        {
-          // Need to expand array
-          events_arr_capacity *= 2;
-          event_starts = realloc(event_starts, events_arr_capacity * sizeof(long));
-          event_ends = realloc(event_ends, events_arr_capacity * sizeof(long));
       
-          if(event_starts == NULL || event_ends == NULL)
-          {
-            print_usage("Not enough memory to read in events!");
-          }
+      if(num_of_events + 1 == events_arr_capacity)
+      {
+        // Need to expand array
+        events_arr_capacity *= 2;
+        event_positions = realloc(event_positions,
+                                  events_arr_capacity * sizeof(long));
+      
+        if(event_positions == NULL)
+        {
+          print_usage("Not enough memory to read in events!");
         }
-
-        event_starts[num_of_events] = event_start;
-        event_ends[num_of_events] = event_end;
-        num_of_events++;
       }
+
+      event_positions[num_of_events++] = event_position;
     }
   }
 
   string_buff_free(events_line);
+
+  // Sort events
+  qsort(event_positions, num_of_events, sizeof(long), cmp_long);
+}
+
+char parse_csv_line(char *line, long *start, long *end,
+                    char *file, unsigned long line_num)
+{
+  char* separator = strchr(line, ',');
+  
+  if(separator == NULL)
+  {
+    separator = strchr(line, '\t');
+  }
+
+  if(separator == NULL)
+  {
+    fprintf(stderr, "Error (file: %s line: %lu): no separator found "
+                    "(tab or comma only)\n",
+            objects_file_path, line_num);
+    print_usage(NULL);
+  }
+
+  *separator = '\0';
+
+  char* start_num_str = trim(line);
+  char* end_num_str = trim(separator+1);
+
+  return (parse_entire_long(start_num_str, start) &&
+          parse_entire_long(end_num_str, end));
+}
+
+// Returns index
+unsigned long bin_search_nearest(long boundary)
+{
+  unsigned long left = 0, right = num_of_events-1;
+
+  unsigned long middle = (left + right) / 2;
+
+  // find index i where i-1 < boundary && i >= boundary
+  while(1)
+  {
+    if(left+1 == right)
+    {
+      return right;
+    }
+    else if(event_positions[middle] < boundary)
+    {
+      left = middle;
+    }
+    else if(event_positions[middle-1] >= boundary)
+    {
+      right = middle;
+    }
+    else
+    {
+      break;
+    }
+
+    middle = (left + right) / 2;
+  }
+
+  return middle;
 }
 
 void run_through_objects(gzFile* objects_file)
@@ -226,7 +246,7 @@ void run_through_objects(gzFile* objects_file)
   char seen_header = 0;
 
   for(line_num = 1;
-      (read_length = string_buff_reset_readline(objects_line, objects_file)) > 0;
+      (read_length = string_buff_reset_gzreadline(objects_line, objects_file)) > 0;
       line_num++)
   {
     string_buff_chomp(objects_line);
@@ -237,47 +257,39 @@ void run_through_objects(gzFile* objects_file)
        objects_line->buff[0] != '#' &&
        !string_is_all_whitespace(objects_line->buff))
     {
-      char* separator = strchr(objects_line->buff, ',');
-      
-      if(separator == NULL)
-      {
-        separator = strchr(objects_line->buff, '\t');
-      }
-
-      if(separator == NULL)
-      {
-        fprintf(stderr, "Error (file: %s line: %lu): no separator found "
-                        "(tab or comma only)\n",
-                objects_file_path, line_num);
-        print_usage(NULL);
-      }
-
-      *separator = '\0';
-
-      char* start_num_str = trim(objects_line->buff);
-      char* end_num_str = trim(separator+1);
-
       long obj_start, obj_end;
 
-      char successs = (parse_entire_long(start_num_str, &obj_start) &&
-                       parse_entire_long(end_num_str, &obj_end) &&
-                       obj_start > 0 && obj_start <= obj_end);
-
-      if(!successs && seen_header)
+      if(!parse_csv_line(objects_line->buff, &obj_start, &obj_end,
+                         objects_file_path, line_num))
       {
-        // Error
-        fprintf(stderr, "Error (file: %s line: %lu): not valid numbers\n",
+        if(seen_header)
+        {
+          // Error
+          fprintf(stderr, "Error (file: %s line: %lu): not valid numbers\n",
+                  objects_file_path, line_num);
+          print_usage(NULL);
+        }
+        else
+        {
+          // Everyone gets one
+          seen_header = 1;
+          continue;
+        }
+      }
+      else if(obj_start > obj_end)
+      {
+        fprintf(stderr, "Error (file: %s line: %lu): object start > end\n",
                 objects_file_path, line_num);
         print_usage(NULL);
       }
-
-      seen_header = 1;
-
-      if(successs)
+      else
       {
         // Read in successfully
+        num_of_objects++;
+        
+        object_overlap_bin += obj_end - obj_start;
       
-        if(bin_count_out != NULL)
+        if(region_start != region_end)
         {
           // update bins with this object
 
@@ -293,8 +305,7 @@ void run_through_objects(gzFile* objects_file)
           }
           else
           {
-            object_overlap_bin += obj_end - obj_start + 2 * mean_event_length;
-
+            // Object is within region
             long left_remaining = obj_start - region_start;
 
             update_bin_denoms(&bins_left_denom_all, bins_left_denom,
@@ -305,44 +316,66 @@ void run_through_objects(gzFile* objects_file)
             update_bin_denoms(&bins_right_denom_all, bins_right_denom,
                               right_remaining);
           }
-        } // done updating bin denominators
+        }
+        // done updating bin denominators
 
         // Loop through events, updating bins using position start, end
-        unsigned long events_i;
-      
-        for(events_i = 0; events_i < num_of_events; events_i++)
+        unsigned long events_i = 0;
+
+        long boundary = obj_start - (bin_size * num_of_bins);
+
+        if(event_positions[0] < boundary &&
+           event_positions[num_of_events-1] > boundary)
         {
-          long event_start = event_starts[events_i];
-          long event_end = event_ends[events_i];
+          // binary search to find start
+          events_i = bin_search_nearest(boundary);
+        }
+      
+        // Events are sorted, so we can be smart about looping through them
+        
+        // Get events to the left of this object
+        for(; events_i < num_of_events && event_positions[events_i] < obj_start;
+            events_i++)
+        {
+          long event_position = event_positions[events_i];
+          
+          // Event to the left of the object
+          unsigned long dist = (unsigned long)(obj_start - event_position);
+          unsigned long bin = dist / bin_size;
 
-          if((event_start >= obj_start && event_start <= obj_end) ||
-             (event_end >= obj_start && event_end <= obj_end))
+          if(bin < num_of_bins)
           {
-            num_events_overlapping_objects++;
+            bins_left[bin]++;
           }
-          else if(event_end < obj_start)
-          {
-            // Event to the left of the object
-            long dist = event_start - obj_end;
-            bin_t bin = dist % bin_size;
+        }
 
-            if(bin < num_of_bins)
-            {
-              bins_left[bin]++;
-            }
+        // Get events in this object
+        for(; events_i < num_of_events && event_positions[events_i] <= obj_end;
+            events_i++)
+        {
+          // Event is in object
+          num_events_overlapping_objects++;
+        }
+
+        // Get events to the right of this object
+        for(; events_i < num_of_events; events_i++)
+        {
+          long event_position = event_positions[events_i];
+
+          // Event to the right of the object
+          unsigned long dist = (unsigned long)(event_position - obj_end);
+          unsigned long bin = dist / bin_size;
+
+          if(bin < num_of_bins)
+          {
+            bins_right[bin]++;
           }
           else
           {
-            // Event to the right of the object
-            long dist = obj_start - event_end;
-            bin_t bin = dist % bin_size;
-
-            if(bin < num_of_bins)
-            {
-              bins_right[bin]++;
-            }
+            break;
           }
-        } // loop over events
+        }
+
       } // if(success)
     } // if(!comment && !whitespace)
   } // loop over objects
@@ -358,7 +391,7 @@ int main(int argc, char* argv[])
   printf("DEBUG: on\n");
   #endif
 
-  if(argc != 6 && argc != 10)
+  if(argc != 6 && argc != 9)
   {
     print_usage(NULL);
   }
@@ -366,7 +399,7 @@ int main(int argc, char* argv[])
   // Parse command line args
   int argi = 1;
 
-  if(argc == 10)
+  if(argc == 9)
   {
     if(strcasecmp(argv[1], "--density") != 0)
     {
@@ -388,25 +421,8 @@ int main(int argc, char* argv[])
       print_usage("region start must be less than the region end\n");
     }
 
-    bin_denom_path = argv[4];
-
-    if(strcmp(bin_denom_path,"-") == 0)
-    {
-      bin_count_out = stdout;
-    }
-    else
-    {
-      bin_count_out = fopen(bin_denom_path, "w");
-    }
-
-    if(bin_count_out == NULL)
-    {
-      fprintf(stderr, "Error: Cannot open output file '%s'\n", argv[4]);
-      print_usage(NULL);
-    }
-
     // start reading arguments from argv[5]
-    argi = 5;
+    argi = 4;
   }
   else
   {
@@ -416,8 +432,8 @@ int main(int argc, char* argv[])
   
   char* bin_size_arg = argv[argi++];
   char* num_of_bins_arg = argv[argi++];
-  objects_file_path = argv[argi++];
   events_file_path = argv[argi++];
+  objects_file_path = argv[argi++];
   char* output_path = argv[argi++];
 
   // Parse bin size, max bin numbers
@@ -469,6 +485,12 @@ int main(int argc, char* argv[])
     out = fopen(output_path, "w");
   }
 
+  // Print run details
+  if(out != stdout)
+  {
+    printf(" bin size: %lu; number of bins either side: %lu\n",
+           bin_size, num_of_bins);
+  }
 
   //
   // Load all events
@@ -477,12 +499,9 @@ int main(int argc, char* argv[])
   // Initialise array to hold events
   num_of_events = 0;
   events_arr_capacity = 500000;
-  event_starts = (long*) malloc(events_arr_capacity * sizeof(long));
-  event_ends = (long*) malloc(events_arr_capacity * sizeof(long));
+  event_positions = (long*) malloc(events_arr_capacity * sizeof(long));
 
-  sum_event_lengths = 0;
-
-  if(event_starts == NULL || event_ends == NULL)
+  if(event_positions == NULL)
   {
     print_usage("Not enough memory to read in events!");
   }
@@ -496,12 +515,9 @@ int main(int argc, char* argv[])
     load_all_events(events_file, 0);
   }
 
-  mean_event_length = (num_of_events == 0) ? 0 : sum_event_lengths / num_of_events;
-
-  if(out != stdout || 1)
+  if(out != stdout)
   {
     printf("Loaded %lu events\n", num_of_events);
-    printf("Mean event length %f\n", mean_event_length);
   }
 
   // Create bins
@@ -518,11 +534,11 @@ int main(int argc, char* argv[])
   unsigned long i;
   for (i = 0; i < num_of_bins; i++)
   {
-    bins_left[i] = 0;
-    bins_right[i] = 0;
+    bins_left[i] = 3;
+    bins_right[i] = 4;
   }
 
-  if(bin_count_out != NULL)
+  if(region_start != region_end)
   {
     bins_left_denom = (double*) malloc(num_of_bins * sizeof(double));
     bins_right_denom = (double*) malloc(num_of_bins * sizeof(double));
@@ -540,57 +556,65 @@ int main(int argc, char* argv[])
   
   run_through_objects(objects_file != NULL ? objects_file : stdin_file);
 
-  if(out != stdout || 1)
+  if(out != stdout)
   {
+    printf("Read %lu objects\n", num_of_objects);
     printf("Saving bin counts to file: %s\n", output_path);
   }
 
-  // Have to use < ULONG_MAX instead of >=0 since we're using unsigned longs
-  for (i = num_of_bins-1; i < ULONG_MAX; i--)
+  if(region_start == region_end)
   {
-    fprintf(out, "%f,%lu\n", -(i+0.5)*bin_size, bins_left[i]);
+    // Have to use == 0 => break; instead of while >=0
+    // since we're using unsigned longs
+    for (i = num_of_bins-1; ; i--)
+    {
+      fprintf(out, "%g,%lu\n", -(double)(i+0.5)*bin_size, bins_left[i]);
+
+      if(i == 0) {
+        break;
+      }
+    }
+
+    fprintf(out, "0,%lu,%g\n", num_events_overlapping_objects,
+                               object_overlap_bin / bin_size);
+
+    for (i = 0; i < num_of_bins; i++)
+    {
+      fprintf(out, "%g,%lu\n", (double)(i+0.5)*bin_size, bins_right[i]);
+    }
   }
-
-  fprintf(out, "0,%lu\n", num_events_overlapping_objects);
-
-  for (i = 0; i < num_of_bins; i++)
+  else
   {
-    fprintf(out, "%f,%lu\n", (i+0.5)*bin_size, bins_right[i]);
+    // Save with bin denominators
+    // Have to use == 0 => break; instead of while >=0
+    // since we're using unsigned longs
+    for (i = num_of_bins-1; ; i--)
+    {
+      fprintf(out, "%g,%lu,%g\n",
+              -(double)(i+0.5)*bin_size,
+              bins_left[i],
+              bins_left_denom[i] + (double)bins_left_denom_all);
+
+      if(i == 0) {
+        break;
+      }
+    }
+
+    fprintf(out, "0,%lu,%g\n", num_events_overlapping_objects,
+                               object_overlap_bin / bin_size);
+
+    for (i = 0; i < num_of_bins; i++)
+    {
+      fprintf(out, "%g,%lu,%g\n",
+              (double)(i+0.5)*bin_size,
+              bins_right[i],
+              bins_right_denom[i] + (double)bins_right_denom_all);
+    }
   }
 
   if(out != stdout)
   {
     fclose(out);
-  }
-
-  if(bin_count_out != NULL)
-  {
-    // Save bin denominators
-
-    if(bin_count_out == stdout)
-    {
-      // Print separator
-      printf("\n\n");
-    }
-    else
-    {
-      printf("Saving bin denominators to file: %s\n", bin_denom_path);
-    }
-
-    // Have to use < ULONG_MAX instead of >=0 since we're using unsigned longs
-    for (i = num_of_bins-1; i < ULONG_MAX; i--)
-    {
-      fprintf(bin_count_out, "%f,%f\n", -(i+0.5)*bin_size,
-              bins_left_denom[i] + bins_left_denom_all);
-    }
-
-    fprintf(bin_count_out, "0,%f\n", object_overlap_bin);
-
-    for (i = 0; i < num_of_bins; i++)
-    {
-      fprintf(bin_count_out, "%f,%f\n", (i+0.5)*bin_size,
-              bins_right_denom[i] + bins_right_denom_all);
-    }
   }
 
   if(stdin_file != NULL)
