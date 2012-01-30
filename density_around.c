@@ -197,8 +197,8 @@ char parse_csv_line(char *line, long *start, long *end,
 
   *separator = '\0';
 
-  char* start_num_str = trim(line);
-  char* end_num_str = trim(separator+1);
+  char* start_num_str = string_trim(line);
+  char* end_num_str = string_trim(separator+1);
 
   return (parse_entire_long(start_num_str, start) &&
           parse_entire_long(end_num_str, end));
@@ -216,7 +216,7 @@ unsigned long bin_search_nearest(long boundary)
   {
     if(left+1 == right)
     {
-      return right;
+      return left;
     }
     else if(event_positions[middle] < boundary)
     {
@@ -228,7 +228,7 @@ unsigned long bin_search_nearest(long boundary)
     }
     else
     {
-      break;
+      return middle;
     }
 
     middle = (left + right) / 2;
@@ -322,13 +322,18 @@ void run_through_objects(gzFile* objects_file)
         // Loop through events, updating bins using position start, end
         unsigned long events_i = 0;
 
-        long boundary = obj_start - (bin_size * num_of_bins);
+        long left_boundary = obj_start - (bin_size * num_of_bins);
+        //long right_boundary = obj_end + (bin_size * num_of_bins);
 
-        if(event_positions[0] < boundary &&
-           event_positions[num_of_events-1] > boundary)
+        if(event_positions[num_of_events-1] < left_boundary)
+        {
+          continue;
+        }
+
+        if(event_positions[0] < left_boundary)
         {
           // binary search to find start
-          events_i = bin_search_nearest(boundary);
+          events_i = bin_search_nearest(left_boundary);
         }
       
         // Events are sorted, so we can be smart about looping through them
@@ -340,7 +345,8 @@ void run_through_objects(gzFile* objects_file)
           long event_position = event_positions[events_i];
           
           // Event to the left of the object
-          unsigned long dist = (unsigned long)(obj_start - event_position);
+          // Distance uses -1 so it starts from 0
+          unsigned long dist = (unsigned long)(obj_start - event_position - 1);
           unsigned long bin = dist / bin_size;
 
           if(bin < num_of_bins)
@@ -363,7 +369,8 @@ void run_through_objects(gzFile* objects_file)
           long event_position = event_positions[events_i];
 
           // Event to the right of the object
-          unsigned long dist = (unsigned long)(event_position - obj_end);
+          // Distance uses -1 so it starts from 0
+          unsigned long dist = (unsigned long)(event_position - obj_end - 1);
           unsigned long bin = dist / bin_size;
 
           if(bin < num_of_bins)
@@ -532,10 +539,10 @@ int main(int argc, char* argv[])
 
   // Initialise bins to zero
   unsigned long i;
-  for (i = 0; i < num_of_bins; i++)
+  for(i = 0; i < num_of_bins; i++)
   {
-    bins_left[i] = 3;
-    bins_right[i] = 4;
+    bins_left[i] = 0;
+    bins_right[i] = 0;
   }
 
   if(region_start != region_end)
@@ -566,19 +573,22 @@ int main(int argc, char* argv[])
   {
     // Have to use == 0 => break; instead of while >=0
     // since we're using unsigned longs
-    for (i = num_of_bins-1; ; i--)
+    if(num_of_bins > 0)
     {
-      fprintf(out, "%g,%lu\n", -(double)(i+0.5)*bin_size, bins_left[i]);
+      for(i = num_of_bins-1; ; i--)
+      {
+        fprintf(out, "%g,%lu\n", -(double)(i+0.5)*bin_size, bins_left[i]);
 
-      if(i == 0) {
-        break;
+        if(i == 0) {
+          break;
+        }
       }
     }
 
     fprintf(out, "0,%lu,%g\n", num_events_overlapping_objects,
                                object_overlap_bin / bin_size);
 
-    for (i = 0; i < num_of_bins; i++)
+    for(i = 0; i < num_of_bins; i++)
     {
       fprintf(out, "%g,%lu\n", (double)(i+0.5)*bin_size, bins_right[i]);
     }
@@ -588,22 +598,25 @@ int main(int argc, char* argv[])
     // Save with bin denominators
     // Have to use == 0 => break; instead of while >=0
     // since we're using unsigned longs
-    for (i = num_of_bins-1; ; i--)
+    if(num_of_bins > 0)
     {
-      fprintf(out, "%g,%lu,%g\n",
-              -(double)(i+0.5)*bin_size,
-              bins_left[i],
-              bins_left_denom[i] + (double)bins_left_denom_all);
+      for(i = num_of_bins-1; ; i--)
+      {
+        fprintf(out, "%g,%lu,%g\n",
+                -(double)(i+0.5)*bin_size,
+                bins_left[i],
+                bins_left_denom[i] + (double)bins_left_denom_all);
 
-      if(i == 0) {
-        break;
+        if(i == 0) {
+          break;
+        }
       }
     }
 
     fprintf(out, "0,%lu,%g\n", num_events_overlapping_objects,
                                object_overlap_bin / bin_size);
 
-    for (i = 0; i < num_of_bins; i++)
+    for(i = 0; i < num_of_bins; i++)
     {
       fprintf(out, "%g,%lu,%g\n",
               (double)(i+0.5)*bin_size,

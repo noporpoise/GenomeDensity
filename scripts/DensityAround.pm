@@ -7,10 +7,27 @@ use Carp;
 
 use base 'Exporter';
 our @EXPORT = qw(density_around load_chr_sizes
-                 vcf_dump_positions rmsk_dump_positions
+                 vcf_dump_positions dump_object_positions
                  merge_similar_csvs);
 
 my $density_cmd = "density_around";
+
+use constant {
+  RMSK_FILE => 1,
+  ENSGENE_FILE_TX => 2,
+  ENSGENE_FILE_CDS => 3,
+  MOTIF_FILE => 4
+  };
+
+my %file_types = ('RMSK_FILE' => RMSK_FILE,
+                  'ENSGENE_FILE_TX' => ENSGENE_FILE_TX,
+                  'ENSGENE_FILE_CDS' => ENSGENE_FILE_CDS,
+                  'MOTIF_FILE' => MOTIF_FILE);
+
+sub get_file_codes_hash()
+{
+  return \%file_types;
+}
 
 sub density_around
 {
@@ -120,7 +137,7 @@ sub vcf_dump_positions
       open($rv_handle, ">$reverse_file") or die("Cannot open '$reverse_file'");
     }
 
-    my $end = $vcf_entry->{'true_POS'} + length($vcf_entry->{'true_REF'});
+    my $end = $vcf_entry->{'true_POS'} + 1 + length($vcf_entry->{'true_REF'});
 
     print $fw_handle $vcf_entry->{'true_POS'}."\n";
     print $rv_handle ($chr_sizes->{$curr_chrom} - $end + 1)."\n";
@@ -136,25 +153,48 @@ sub vcf_dump_positions
 }
 
 # Returns chromosomes
-sub rmsk_dump_positions
+sub dump_object_positions
 {
-  my ($rmsk_handle, $out_dir, $chr_sizes, $csvsep) = @_;
+  my ($filetype, $handle, $out_dir, $chr_sizes, $csvsep) = @_;
 
   if(!defined($csvsep))
   {
     $csvsep = ",";
   }
 
-  my $rmsk_line;
+  if(!(grep {$_ == $filetype} values %file_types))
+  {
+    croak("Invalid filetype '$filetype' - not one of (" .
+          join(", ", keys %file_types) . ")\n");
+  }
+
+  my $line;
   my $curr_chrom = "";
   my ($fw_handle, $rv_handle);
 
   my %chrs = ();
 
-  while(defined($rmsk_line = <$rmsk_handle>))
+  while(defined($line = <$handle>))
   {
-    my (undef,undef,undef,undef,undef,$chr,$start,$end,undef,$strand)
-      = split(/\t/, $rmsk_line);
+    my ($chr, $start, $end, $strand);
+
+    if($filetype == RMSK_FILE)
+    {
+      (undef,undef,undef,undef,undef,$chr,$start,$end,undef,$strand)
+        = split(/\t/, $line);
+    }
+    elsif($filetype == ENSGENE_FILE_TX)
+    {
+      (undef,undef,$chr,$strand,$start,$end) = split(/\t/, $line);
+    }
+    elsif($filetype == ENSGENE_FILE_CDS)
+    {
+      (undef,undef,$chr,$strand,undef,undef,$start,$end) = split(/\t/, $line);
+    } 
+    elsif($filetype == MOTIF_FILE)
+    {
+      ($chr,$start,$end,$strand) = split(/\t/, $line);
+    }
 
     $chr = _get_chr_name($chr);
 
@@ -194,9 +234,9 @@ sub rmsk_dump_positions
 
       if($rv_start < 0 || $rv_end < 0)
       {
-        chomp($rmsk_line);
+        chomp($line);
         print STDERR "rmsk entry outside of chromosome size\n";
-        print STDERR "$rmsk_line\n";
+        print STDERR "$line\n";
         die();
       }
 
@@ -204,8 +244,8 @@ sub rmsk_dump_positions
     }
     else
     {
-      chomp($rmsk_line);
-      die("Unknown strand on line: '$rmsk_line'\n");
+      chomp($line);
+      die("Unknown strand on line: '$line'\n");
     }
   }
 

@@ -6,15 +6,17 @@ use warnings;
 use FindBin;
 use lib $FindBin::Bin;
 
+use File::Path qw(remove_tree); # rmdir for none-empty directories
+
 use VCFFile;
 use DensityAround;
 
 ## Prefs
 my $csvsep = ",";
-my $tmp_dir = "tmp_density";
+my $tmp_dir_base = "tmp_density";
 my $tmp_vcf_dir = "tmp_vcf";
-my $tmp_rmsk_dir = "tmp_rmsk";
-my $tmp_out_dir = "tmp_rmsk_vcf";
+my $tmp_objects_dir = "tmp_obj";
+my $tmp_out_dir = "tmp_obj_vcf";
 ##
 
 sub print_usage
@@ -24,21 +26,22 @@ sub print_usage
     print STDERR "Error: $err\n";
   }
 
-  print STDERR "Usage: ./vcf_density_around_rmsk.pl <bin_size> <num_bins> " .
-               "<rmsk.txt> <chr_sizes.csv> <out.csv> [in.vcf]\n";
-  print STDERR "  VCF and rmsk don't need to be sorted.  \n";
-  
+  print STDERR "Usage: ./vcf_density_around.pl <bin_size> <num_bins> " .
+               "<FILE_TYPE> <objects.csv> <chr_sizes.csv> <out.csv> [in.vcf]\n";
+  print STDERR "  VCF and objects file don't need to be sorted.  \n";
+
   exit;
 }
 
-if(@ARGV < 5 || @ARGV > 6)
+if(@ARGV < 6 || @ARGV > 7)
 {
   print_usage();
 }
 
 my $bin_size = shift;
 my $num_bins = shift;
-my $rmsk_file = shift;
+my $file_type = shift;
+my $objects_file = shift;
 my $chr_sizes_file = shift;
 my $out_csv = shift;
 my $vcf_file = shift;
@@ -52,21 +55,56 @@ elsif($num_bins !~ /\d+/)
   print_usage("Invalid number of bins: +ve integers plz");
 }
 
-if(-e $tmp_dir)
+my $file_codes_hash = get_file_codes_hash();
+$file_type = uc($file_type);
+my $file_code = $file_codes_hash->{$file_type};
+
+if(!defined($file_code))
 {
-  print_usage("Output directory already exists '$tmp_dir'");
+  print_usage("FILE_TYPE not one of (".join(", ", sort keys %$file_code).")");
 }
 
-mkdir($tmp_dir);
+#
+# Create tmp directory
+#
+my $tmp_dir = $tmp_dir_base;
+my $created_tmp_dir = 0;
+
+if(-e $tmp_dir)
+{
+  for(my $i = 1; $i < 100; $i++)
+  {
+    if(-e $tmp_dir)
+    {
+      $tmp_dir = $tmp_dir_base."_".$i;
+    }
+    else
+    {
+      mkdir($tmp_dir);
+      $created_tmp_dir = 1;
+      last;
+    }
+  }
+}
+else
+{
+  mkdir($tmp_dir);
+  $created_tmp_dir = 1;
+}
+
+if(!$created_tmp_dir)
+{
+  print_usage("Many tmp directories already exist: '$tmp_dir..'");
+}
 
 #
 # Create output dirs
 #
 $tmp_vcf_dir = $tmp_dir."/".$tmp_vcf_dir;
-$tmp_rmsk_dir = $tmp_dir."/".$tmp_rmsk_dir;
+$tmp_objects_dir = $tmp_dir."/".$tmp_objects_dir;
 $tmp_out_dir = $tmp_dir."/".$tmp_out_dir;
 mkdir($tmp_vcf_dir) or die("Cannot create dir '$tmp_vcf_dir'");
-mkdir($tmp_rmsk_dir) or die("Cannot create dir '$tmp_rmsk_dir'");
+mkdir($tmp_objects_dir) or die("Cannot create dir '$tmp_objects_dir'");
 mkdir($tmp_out_dir) or die("Cannot create dir '$tmp_out_dir'");
 
 #
@@ -94,16 +132,18 @@ my $vcf = new VCFFile($vcf_handle);
 my $chr_sizes = load_chr_sizes($chr_sizes_file);
 my @chroms = sort {$a cmp $b} keys %$chr_sizes;
 
-print "Chromosomes: " . join(", ", @chroms) . "\n";
+#
+# Split objects file into separate chromosomes and strands
+#
+my $obj_handle;
+open($obj_handle, $objects_file)
+  or die("Cannot open objects file '$objects_file'\n");
 
-#
-# Split rmsk.txt file into separate chr positions
-#
-my $rmsk_handle;
-open($rmsk_handle, $rmsk_file) or die("Cannot open rmsk file '$rmsk_file'\n");
-print "Dumping rmsk coordinates..\n";
-rmsk_dump_positions($rmsk_handle, $tmp_rmsk_dir, $chr_sizes, $csvsep);
-close($rmsk_handle);
+print "Dumping object coordinates..\n";
+dump_object_positions($file_code, $obj_handle, $tmp_objects_dir,
+                      $chr_sizes, $csvsep);
+
+close($obj_handle);
 
 # Split up VCF file
 print "Dumping VCF positions..\n";
@@ -116,11 +156,11 @@ my @resulting_chroms = ();
 for my $chrom (@chroms)
 {
   my $events_file_fw = $tmp_vcf_dir."/vcf_".$chrom."_fw.csv";
-  my $objects_file_fw = $tmp_rmsk_dir."/rmsk_".$chrom."_fw.csv";
+  my $objects_file_fw = $tmp_objects_dir."/obj_".$chrom."_fw.csv";
   my $counts_out_fw = $tmp_out_dir."/".$chrom."_fw.out";
 
   my $events_file_rv = $tmp_vcf_dir."/vcf_".$chrom."_rv.csv";
-  my $objects_file_rv = $tmp_rmsk_dir."/rmsk_".$chrom."_rv.csv";
+  my $objects_file_rv = $tmp_objects_dir."/obj_".$chrom."_rv.csv";
   my $counts_out_rv = $tmp_out_dir."/".$chrom."_rv.out";
 
   if(-e $events_file_fw && -e $objects_file_fw &&
@@ -134,9 +174,9 @@ for my $chrom (@chroms)
   
     push(@resulting_chroms, $chrom);
   }
-
-  
 }
+
+print "Chromosomes: " . join(", ", @resulting_chroms) . "\n";
 
 # Now merge
 my @merge_files = ((map {$tmp_out_dir."/".$_."_fw.out"} @resulting_chroms),
@@ -149,5 +189,9 @@ print "Merging results into file '$out_csv'...\n";
 open($handle, ">$out_csv") or die("Cannot open file $out_csv\n");
 merge_similar_csvs($handle, $csvsep, @merge_files);
 close($handle);
+
+print "Removing temp directory '$tmp_dir'...\n";
+
+#remove_tree($tmp_dir) or die("Couldn't remove tmp directory");
 
 print "Done!\n";
