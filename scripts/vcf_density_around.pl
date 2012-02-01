@@ -27,7 +27,7 @@ sub print_usage
   }
 
   print STDERR "Usage: ./vcf_density_around.pl <bin_size> <num_bins> " .
-               "<FILE_TYPE> <objects.csv> <chr_sizes.csv> <out.csv> [in.vcf]\n";
+               "<FILE_TYPE> <objects.txt> <chr_sizes.csv> <out.csv> [in.vcf]\n";
   print STDERR "  VCF and objects file don't need to be sorted.  \n";
 
   exit;
@@ -61,7 +61,7 @@ my $file_code = $file_codes_hash->{$file_type};
 
 if(!defined($file_code))
 {
-  print_usage("FILE_TYPE not one of (".join(", ", sort keys %$file_code).")");
+  print_usage("FILE_TYPE not one of (".join(", ", sort keys %$file_codes_hash).")");
 }
 
 #
@@ -72,7 +72,7 @@ my $created_tmp_dir = 0;
 
 if(-e $tmp_dir)
 {
-  for(my $i = 1; $i < 100; $i++)
+  for(my $i = 1; ; $i++)
   {
     if(-e $tmp_dir)
     {
@@ -192,6 +192,6 @@ close($handle);
 
 print "Removing temp directory '$tmp_dir'...\n";
 
-#remove_tree($tmp_dir) or die("Couldn't remove tmp directory");
+remove_tree($tmp_dir) or die("Couldn't remove tmp directory");
 
 print "Done!\n";

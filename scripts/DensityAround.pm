@@ -6,7 +6,7 @@ use warnings;
 use Carp;
 
 use base 'Exporter';
-our @EXPORT = qw(density_around load_chr_sizes
+our @EXPORT = qw(density_around load_chr_sizes get_file_codes_hash
                  vcf_dump_positions dump_object_positions
                  merge_similar_csvs);
 
@@ -19,10 +19,10 @@ use constant {
   MOTIF_FILE => 4
   };
 
-my %file_types = ('RMSK_FILE' => RMSK_FILE,
-                  'ENSGENE_FILE_TX' => ENSGENE_FILE_TX,
-                  'ENSGENE_FILE_CDS' => ENSGENE_FILE_CDS,
-                  'MOTIF_FILE' => MOTIF_FILE);
+my %file_types = ('RMSK' => RMSK_FILE,
+                  'ENSGENE_TX' => ENSGENE_FILE_TX,
+                  'ENSGENE_CDS' => ENSGENE_FILE_CDS,
+                  'MOTIF' => MOTIF_FILE);
 
 sub get_file_codes_hash()
 {
@@ -200,8 +200,9 @@ sub dump_object_positions
 
     if(!defined($chr_sizes->{$chr}))
     {
-      # Alternatively, freak out and die
-      print STDERR "Chrom size not given for '$chr'\n";
+      # Ignore, warn or freak out and die
+      #print STDERR "Chrom size not given for '$chr'\n";
+      #die("Chrom size not given for '$chr'\n");
       next;
     }
 
@@ -216,8 +217,8 @@ sub dump_object_positions
         close($rv_handle);
       }
 
-      my $fw_file = $out_dir."/rmsk_".$curr_chrom."_fw.csv";
-      my $rv_file = $out_dir."/rmsk_".$curr_chrom."_rv.csv";
+      my $fw_file = $out_dir."/obj_".$curr_chrom."_fw.csv";
+      my $rv_file = $out_dir."/obj_".$curr_chrom."_rv.csv";
 
       open($fw_handle, ">$fw_file") or die("Cannot open '$fw_file'\n");
       open($rv_handle, ">$rv_file") or die("Cannot open '$rv_file'\n");
@@ -235,7 +236,8 @@ sub dump_object_positions
       if($rv_start < 0 || $rv_end < 0)
       {
         chomp($line);
-        print STDERR "rmsk entry outside of chromosome size\n";
+        print STDERR "object entry outside of chromosome size (" .
+                     $chr_sizes->{$curr_chrom} . ")\n";
         print STDERR "$line\n";
         die();
       }
