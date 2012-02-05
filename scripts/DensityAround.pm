@@ -6,7 +6,8 @@ use warnings;
 use Carp;
 
 use base 'Exporter';
-our @EXPORT = qw(density_around load_chr_sizes get_file_codes_hash
+our @EXPORT = qw(density_around load_chr_sizes
+                 get_file_codes_hash get_file_codes_hash_ss
                  vcf_dump_positions dump_object_positions
                  merge_similar_csvs);
 
@@ -16,7 +17,9 @@ use constant {
   RMSK_FILE => 1,
   ENSGENE_FILE_TX => 2,
   ENSGENE_FILE_CDS => 3,
-  MOTIF_FILE => 4
+  MOTIF_FILE => 4,
+  HOTSPOT_FILE => 5,
+  COLDSPOT_FILE => 6
   };
 
 my %file_types = ('RMSK' => RMSK_FILE,
@@ -24,9 +27,18 @@ my %file_types = ('RMSK' => RMSK_FILE,
                   'ENSGENE_CDS' => ENSGENE_FILE_CDS,
                   'MOTIF' => MOTIF_FILE);
 
-sub get_file_codes_hash()
+# Single stranded file types
+my %file_types_ss = ('HOTSPOT' => HOTSPOT_FILE,
+                     'COLDSPOT' => COLDSPOT_FILE);
+
+sub get_file_codes_hash
 {
   return \%file_types;
+}
+
+sub get_file_codes_hash_ss
+{
+  return \%file_types_ss;
 }
 
 sub density_around
@@ -100,7 +112,7 @@ sub load_chr_sizes
 # Returns chromosomes
 sub vcf_dump_positions
 {
-  my ($vcf, $out_dir, $chr_sizes) = @_;
+  my ($vcf, $out_dir, $chr_sizes, $single_stranded) = @_;
 
   my $vcf_entry;
   my $curr_chrom = "";
@@ -127,26 +139,132 @@ sub vcf_dump_positions
       if(defined($fw_handle))
       {
         close($fw_handle);
-        close($rv_handle);
+        
+        if(!$single_stranded) {
+          close($rv_handle);
+        }
       }
 
-      my $forward_file = $out_dir."/vcf_".$curr_chrom."_fw.csv";
-      my $reverse_file = $out_dir."/vcf_".$curr_chrom."_rv.csv";
+      if($single_stranded)
+      {
+        my $file = $out_dir."/vcf_".$curr_chrom.".csv";
+        open($fw_handle, ">$file") or die("Cannot open '$file'");
+      }
+      else
+      {
+        my $forward_file = $out_dir."/vcf_".$curr_chrom."_fw.csv";
+        my $reverse_file = $out_dir."/vcf_".$curr_chrom."_rv.csv";
 
-      open($fw_handle, ">$forward_file") or die("Cannot open '$forward_file'");
-      open($rv_handle, ">$reverse_file") or die("Cannot open '$reverse_file'");
+        open($fw_handle, ">$forward_file") or die("Cannot open '$forward_file'");
+        open($rv_handle, ">$reverse_file") or die("Cannot open '$reverse_file'");
+      }
     }
 
     my $end = $vcf_entry->{'true_POS'} + 1 + length($vcf_entry->{'true_REF'});
 
     print $fw_handle $vcf_entry->{'true_POS'}."\n";
-    print $rv_handle ($chr_sizes->{$curr_chrom} - $end + 1)."\n";
+    
+    if(!$single_stranded)
+    {
+      print $rv_handle ($chr_sizes->{$curr_chrom} - $end + 1)."\n";
+    }
   }
 
   if(defined($fw_handle))
   {
     close($fw_handle);
-    close($rv_handle);
+
+    if(!$single_stranded) {
+      close($rv_handle);
+    }
+  }
+
+  return sort {$a cmp $b} keys %chrs;
+}
+
+sub dump_recomb_positions
+{
+  my ($filetype, $handle, $out_dir, $chr_sizes, $csvsep) = @_;
+
+  if($filetype != HOTSPOT_FILE && $filetype != COLDSPOT_FILE)
+  {
+    die("Not hotspot or coldspot file type! ($filetype)\n");
+  }
+
+  my $header = <$handle>;
+
+  if(!defined($header))
+  {
+    die("Empty hotspot / coldspot file\n");
+  }
+
+  my @cols = split(/\t/, $header);
+
+  my ($header_hot_start) = grep {$cols[$_] =~ /HotStart/i} 0..$#cols;
+  my ($header_hot_end) = grep {$cols[$_] =~ /HotEnd/i} 0..$#cols;
+
+  my ($header_cold_start) = grep {$cols[$_] =~ /ColdStart/i} 0..$#cols;
+  my ($header_cold_end) = grep {$cols[$_] =~ /ColdEnd/i} 0..$#cols;
+
+  my $line;
+  my $curr_chrom = "";
+  my $obj_handle;
+
+  my %chrs = ();
+
+  while(defined($line = <$handle>))
+  {
+    @cols = split(/\t/, $line);
+
+    my $chr = _get_chr_name($cols[0]);
+
+    my ($start, $end);
+
+    if(!defined($chr_sizes->{$chr}))
+    {
+      # Ignore, warn or freak out and die
+      #print STDERR "Chrom size not given for '$chr'\n";
+      #die("Chrom size not given for '$chr'\n");
+      next;
+    }
+    
+    if($filetype == HOTSPOT_FILE)
+    {
+      $start = $cols[$header_hot_start];
+      $end = $cols[$header_hot_end];
+    }
+    else
+    {
+      $start = $cols[$header_cold_start];
+      $end = $cols[$header_cold_end];
+    }
+
+    # Hotspot / coldspots are in a silly 123.456 notation meaning 123,456
+    $start =~ s/\.//g;
+    $end =~ s/\.//g;
+
+    if($chr ne $curr_chrom)
+    {
+      $curr_chrom = $chr;
+      $chrs{$curr_chrom} = 1;
+
+      if(defined($obj_handle))
+      {
+        close($obj_handle);
+      }
+
+      my $file = $out_dir."/obj_".$curr_chrom.".csv";
+      #print "opening '$file'\n";
+      #exit;
+      open($obj_handle, ">$file") or die("Cannot open '$file'\n");
+    }
+
+    print $obj_handle $start.$csvsep.$end."\n";
+  }
+
+  if(defined($obj_handle))
+  {
+    close($obj_handle);
   }
 
   return sort {$a cmp $b} keys %chrs;
@@ -162,10 +280,15 @@ sub dump_object_positions
     $csvsep = ",";
   }
 
-  if(!(grep {$_ == $filetype} values %file_types))
+  if($filetype == COLDSPOT_FILE || $filetype == HOTSPOT_FILE)
   {
-    croak("Invalid filetype '$filetype' - not one of (" .
-          join(", ", keys %file_types) . ")\n");
+    return dump_recomb_positions($filetype, $handle, $out_dir,
+                                 $chr_sizes, $csvsep);
+  }
+  elsif(!(grep {$_ == $filetype} values %file_types))
+  {
+    croak("Invalid filetype '$filetype' - not one of " .
+          "(" . join(", ", keys %file_types) . ")\n");
   }
 
   my $line;
