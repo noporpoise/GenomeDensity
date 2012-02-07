@@ -221,11 +221,27 @@ else
                   (map {$tmp_out_dir."/".$_."_rv.out"} @resulting_chroms));
 }
 
+my @columns = ("pos");
+
+for my $chr (@resulting_chroms)
+{
+  if($single_stranded)
+  {
+    push(@columns, $chr.".counts", $chr.".densities");
+  }
+  else
+  {
+    push(@columns, $chr.".fw.counts", $chr.".fw.densities");
+    push(@columns, $chr.".rv.counts", $chr.".rv.densities");
+  }
+}
+
 my $handle;
 
 print "Merging results into file '$out_csv'...\n";
 
 open($handle, ">$out_csv") or die("Cannot open file $out_csv\n");
+print $handle join($csvsep, @columns) . "\n";
 merge_similar_csvs($handle, $csvsep, @merge_files);
 close($handle);
 

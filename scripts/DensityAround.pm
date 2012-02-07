@@ -383,30 +383,39 @@ sub dump_object_positions
   return sort {$a cmp $b} keys %chrs;
 }
 
-sub merge_similar_csvs
+sub merge_output_csvs
 {
-  my ($out_handle, $csvsep, @csv_files) = @_;
+  my ($out_handle, $csvsep, $headings, @csv_files) = @_;
 
   my $bins_offsets = [];
   my $counts = [];
   my $densities = [];
 
+  my $rows = [];
+
   for my $file (@csv_files)
   {
-    load_similar_csvs($bins_offsets, $counts, $densities, $file);
+    load_similar_csvs($bins_offsets, $counts, $densities, $rows, $file);
+  }
+
+  if(defined($headings))
+  {
+    print $out_handle join($csvsep, @$headings, "rate.kbp")."\n";
   }
 
   # dump
   for(my $i = 0; $i < @$counts; $i++)
   {
-    print $out_handle join($csvsep, $bins_offsets->[$i],
-                           $counts->[$i], $densities->[$i]) . "\n";
+    print $out_handle join($csvsep, $bins_offsets->[$i], @{$rows->[$i]},
+                           $counts->[$i], $densities->[$i]) . $csvsep .
+                      sprintf("%.3f", 1000*$counts->[$i] / $densities->[$i]) .
+                      "\n";
   }
 }
 
 sub load_similar_csvs
 {
-  my ($bins_offsets, $counts, $densities, $file) = @_;
+  my ($bins_offsets, $counts, $densities, $rows, $file) = @_;
 
   open(FILE, $file) or croak("Cannot open file '$file'");
 
@@ -430,6 +439,8 @@ sub load_similar_csvs
       if(!defined($bins_offsets->[$line_num]))
       {
         $bins_offsets->[$line_num] = $1;
+        # Create row
+        $rows->[$line_num] = [];
       }
       elsif($bins_offsets->[$line_num] != $1)
       {
@@ -439,6 +450,8 @@ sub load_similar_csvs
       $counts->[$line_num] += $2;
       $densities->[$line_num] += $3;
       $line_num++;
+
+      push(@{$rows->[$line_num]}, $2, $3);
     }
     else
     {
