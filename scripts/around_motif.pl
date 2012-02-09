@@ -18,8 +18,10 @@ sub print_usage
     print STDERR "Error: $err\n";
   }
 
-  print STDERR "Usage: ./around_ensgene.pl <motif.txt> <max_indel> <chr_sizes.csv> <in.vcf> <out_dir>\n";
-  print STDERR "  Prints commands to produce density graphs for dupe/non-dupe, INS/DEL, indel sizes\n";
+  print STDERR "Usage: ./around_ensgene.pl <motif.txt> <SNP|max_indel> " .
+               "<chr_sizes.csv> <in.vcf> <out_dir>\n" .
+"  Prints commands to produce density graphs for dupe/non-dupe, INS/DEL, \n" .
+"  indel sizes\n";
   exit;
 }
 
@@ -29,10 +31,27 @@ if(@ARGV != 5)
 }
 
 my $motif_file = shift;
-my $max_indel = shift;
+my $indel_or_snps = shift;
 my $chr_sizes = shift;
 my $vcf_file = shift;
 my $out_dir = shift;
+
+my $max_indel;
+my $is_snps = 0;
+
+if($indel_or_snps =~ /^SNPs?$/i)
+{
+  $is_snps = 1;
+}
+else
+{
+  if($indel_or_snps !~ /^\d+$/)
+  {
+    print_usage("max_indel is not a positive integer and isn't 'SNP'");
+  }
+
+  $max_indel = $indel_or_snps;
+}
 
 # Loop through different bin sizes / number of bins
 for(my $b = 0; $b < @bin_sizes; $b++)
@@ -48,10 +67,13 @@ for(my $b = 0; $b < @bin_sizes; $b++)
     # With no polarity
     run_cmd($bin_size, $num_bins, $slippage);
 
-    # With no polarity and indel size
-    for(my $indel_size = 1; $indel_size < $max_indel; $indel_size++)
+    if(!$is_snps)
     {
-      run_cmd($bin_size, $num_bins, $slippage, undef, $indel_size);
+      # With no polarity and indel size
+      for(my $indel_size = 1; $indel_size <= $max_indel; $indel_size++)
+      {
+        run_cmd($bin_size, $num_bins, $slippage, undef, $indel_size);
+      }
     }
 
     # With polarity
@@ -60,9 +82,12 @@ for(my $b = 0; $b < @bin_sizes; $b++)
       # all indel sizes
       run_cmd($bin_size, $num_bins, $slippage, $polarity);
 
-      for(my $indel_size = 1; $indel_size <= $max_indel; $indel_size++)
+      if(!$is_snps)
       {
-        run_cmd($bin_size, $num_bins, $slippage, $polarity, $indel_size);
+        for(my $indel_size = 1; $indel_size <= $max_indel; $indel_size++)
+        {
+          run_cmd($bin_size, $num_bins, $slippage, $polarity, $indel_size);
+        }
       }
     }
   }

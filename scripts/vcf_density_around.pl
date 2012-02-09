@@ -7,6 +7,7 @@ use FindBin;
 use lib $FindBin::Bin;
 
 use File::Path qw(remove_tree); # rmdir for none-empty directories
+#use File::Path qw(rmtree); # rmdir for none-empty directories
 
 use VCFFile;
 use DensityAround;
@@ -241,8 +242,8 @@ my $handle;
 print "Merging results into file '$out_csv'...\n";
 
 open($handle, ">$out_csv") or die("Cannot open file $out_csv\n");
-print $handle join($csvsep, @columns) . "\n";
-merge_similar_csvs($handle, $csvsep, @merge_files);
+
+merge_output_csvs($handle, $csvsep, \@columns, @merge_files);
 close($handle);
 
 print "Removing temp directory '$tmp_dir'...\n";

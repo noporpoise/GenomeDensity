@@ -9,7 +9,7 @@ use base 'Exporter';
 our @EXPORT = qw(density_around load_chr_sizes
                  get_file_codes_hash get_file_codes_hash_ss
                  vcf_dump_positions dump_object_positions
-                 merge_similar_csvs);
+                 merge_output_csvs);
 
 my $density_cmd = "density_around";
 
@@ -77,7 +77,7 @@ sub load_chr_sizes
   my $chr_sizes = {};
 
   open(CHROMS, $chr_sizes_file)
-    or print_usage("Cannot open chr sizes file '$chr_sizes_file'");
+    or die("Cannot open chr sizes file '$chr_sizes_file'");
 
   my $chr_line = <CHROMS>;
 
@@ -407,8 +407,8 @@ sub merge_output_csvs
   for(my $i = 0; $i < @$counts; $i++)
   {
     print $out_handle join($csvsep, $bins_offsets->[$i], @{$rows->[$i]},
-                           $counts->[$i], $densities->[$i]) . $csvsep .
-                      sprintf("%.3f", 1000*$counts->[$i] / $densities->[$i]) .
+                           $counts->[$i], $densities->[$i],
+                           sprintf("%.3f", 1000*$counts->[$i] / $densities->[$i])) .
                       "\n";
   }
 }
@@ -449,9 +449,9 @@ sub load_similar_csvs
 
       $counts->[$line_num] += $2;
       $densities->[$line_num] += $3;
-      $line_num++;
-
       push(@{$rows->[$line_num]}, $2, $3);
+
+      $line_num++;
     }
     else
     {
