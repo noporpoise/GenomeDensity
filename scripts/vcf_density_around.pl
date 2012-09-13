@@ -233,7 +233,6 @@ while(defined(my $vcf_entry = $vcf->read_entry()))
     }
   }
 
-  #my $handle = $chr_to_handle{$chr};
   my $fh_fw = $vcf_chr_to_handle{$chr.'_forward'};
   print $fh_fw $vcf_entry->{'POS'}."\n";
 
@@ -314,7 +313,8 @@ if(@output_files > 0)
 }
 else
 {
-  print "No results :-(\n";
+  print STDERR "No results :-(\n";
+  exit(1);
 }
 
 print "Removing temp directory '$tmp_dir'...\n";
