@@ -63,3 +63,28 @@ plot_rates_around = function(file,rate_per,title,xaxis,yaxis,out_file)
 
   dev.off();
 }
+
+plot_indels = function(num_of_bins, bin_size, csv_base_name, title_name,
+                       output_dir, output_prefix, max_indel_size)
+{
+  short_types=c('ins','del');
+  long_types=c('insertions', 'deletions');
+
+  for(indel_size in 1:10)
+  {
+    for(type in 1:2)
+    {
+      short_type=short_types[type];
+      long_type=long_types[type];
+
+      file=paste(csv_base_name,'.',num_of_bins,'bins.',bin_size,'width.',indel_size,short_type,'.csv',sep='');
+      title=paste(title_name,' ',indel_size,'bp ',long_type,', ',num_of_bins,' x ',bin_size,'bp bins',sep='');
+      xaxis=paste(indel_size,'bp ',long_type,' per ',bin_size,'bp',sep='');
+      out_file_counts=paste(output_dir,'/counts/',output_prefix,'.',indel_size,short_type,'.counts.pdf',sep='');
+      out_file_rates=paste(output_dir,'/rates/',output_prefix,'.',indel_size,short_type,'.rates.pdf',sep='');
+
+      plot_counts_around(file, title, 'Dist from gene TSS/TSE', xaxis, out_file_counts);
+      plot_rates_around(file, bin_size, title, 'Dist from gene TSS/TSE', xaxis, out_file_rates);
+    }
+  }
+}

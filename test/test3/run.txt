@@ -1,0 +1,6 @@
+Montag:density_around isaac$ ./density_around --density -2000 1 10 10 test/test3/test3.events test/test3/test3.objects test/test3/test3.out.csv
+ bin size: 10; number of bins either side: 10
+Loaded 1 events
+Read 1 objects
+Saving bin counts to file: test/test3/test3.out.csv
+Montag:density_around isaac$
