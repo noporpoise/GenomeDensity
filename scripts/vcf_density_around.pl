@@ -144,6 +144,8 @@ mkdir($tmp_out_dir) or die("Cannot create dir '$tmp_out_dir'");
 
 print "Dumping object positions..\n";
 
+my $has_reverse_strand = 0;
+
 my $bed_line;
 open(BED, $objects_bed) or die("Cannot open objects file '$objects_bed'");
 
@@ -175,6 +177,7 @@ while(defined($bed_line = <BED>))
   {
     $key .= '_reverse';
     ($bed_start, $bed_end) = (-$bed_end, -$bed_start);
+    $has_reverse_strand = 1;
   }
   else
   {
@@ -214,11 +217,16 @@ while(defined(my $vcf_entry = $vcf->read_entry()))
 
   if(!defined($vcf_chr_to_handle{$chr.'_forward'}))
   {
-    my @file_names = ($chr.'_forward',$chr.'_reverse');
+    my $file_name = $chr.'_forward';
+    my $file = $tmp_vcf_dir.'/'.$file_name;
 
-    for my $file_name (@file_names)
+    open($vcf_chr_to_handle{$file_name}, ">$file")
+      or die("Cannot open file '$file'");
+
+    if($has_reverse_strand)
     {
-      my $file = $tmp_vcf_dir.'/'.$file_name;
+      $file_name = $chr.'_reverse';
+      $file = $tmp_vcf_dir.'/'.$file_name;
 
       open($vcf_chr_to_handle{$file_name}, ">$file")
         or die("Cannot open file '$file'");
@@ -227,10 +235,13 @@ while(defined(my $vcf_entry = $vcf->read_entry()))
 
   #my $handle = $chr_to_handle{$chr};
   my $fh_fw = $vcf_chr_to_handle{$chr.'_forward'};
-  my $fh_rv = $vcf_chr_to_handle{$chr.'_reverse'};
-
   print $fh_fw $vcf_entry->{'POS'}."\n";
-  print $fh_rv (-$vcf_entry->{'POS'})."\n";
+
+  if($has_reverse_strand)
+  {
+    my $fh_rv = $vcf_chr_to_handle{$chr.'_reverse'};
+    print $fh_rv (-$vcf_entry->{'POS'})."\n";
+  }
 }
 
 # Close handles
