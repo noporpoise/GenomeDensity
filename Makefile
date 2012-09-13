@@ -1,22 +1,26 @@
-LIBS_PATH=../libs
+LIBS_PATH = ../libs
+STRING_BUF_PATH = $(LIBS_PATH)/string_buffer
+UTILITY_LIB_PATH = $(LIBS_PATH)/utility_lib
 
-ifdef DEBUG
-	FLAGS := -DDEBUG=1 --debug
-else
-	FLAGS := -O3
+ifndef CC
+	CC = gcc
 endif
 
-STRING_BUF_PATH := $(LIBS_PATH)/string_buffer
-UTILITY_LIB_PATH := $(LIBS_PATH)/utility_lib
+ifdef DEBUG
+	CFLAGS := -DDEBUG=1 --debug
+else
+	CFLAGS := -O3
+endif
 
-LIB_FILES := -I $(STRING_BUF_PATH) $(STRING_BUF_PATH)/string_buffer.c \
-             -I $(UTILITY_LIB_PATH) $(UTILITY_LIB_PATH)/utility_lib.c
+CFLAGS := -Wall -Wextra
 
-# Add compile time
-FLAGS := $(FLAGS) -DCOMPILE_TIME='"$(shell date)"'
+INCS = -I $(STRING_BUF_PATH) $(STRING_BUF_PATH)/string_buffer.c \
+       -I $(UTILITY_LIB_PATH) $(UTILITY_LIB_PATH)/utility_lib.c
+
+LIBS = -lz
 
 all:
-	gcc -o density_around $(FLAGS) -Wall -lz $(LIB_FILES) density_around.c
+	$(CC) -o density_around $(CFLAGS) $(INCS) density_around.c $(LIBS)
 
 clean:
 	if test -e density_around; then rm density_around; fi

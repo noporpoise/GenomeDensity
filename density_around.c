@@ -49,7 +49,7 @@ unsigned long num_of_objects = 0;
 bin_t num_events_overlapping_objects = 0;
 bin_t *bins_left, *bins_right;
 
-// Denominotor results - optional
+// Denominator results - optional
 long region_start = 0, region_end = 0; // from cmdline args
 double object_overlap_bin = 0;
 double *bins_left_denom = NULL, *bins_right_denom = NULL;
@@ -79,7 +79,7 @@ void print_usage(char* err_msg)
 "    actual event density around objects\n"
 "    (e.g. '--density 1 2000000 chr1.csv' for a chromosome)\n"
 "\n"
-"  turner.isaac@gmail.com  (compiled: "COMPILE_TIME")\n");
+"  turner.isaac@gmail.com  (compiled: "__DATE__" "__TIME__")\n");
 
   exit(EXIT_FAILURE);
 }
@@ -108,17 +108,17 @@ void update_bin_denoms(unsigned long *all_bins_denom, double *bins_denom,
 
 void load_all_events(gzFile* events_file, char reading_from_stdin)
 {
-  STRING_BUFFER* events_line = string_buff_init(200);
+  StrBuf* events_line = strbuf_init(200);
 
   t_buf_pos read_length;
   unsigned long line_num;
   char prev_line_emtpy = 0;
 
   for(line_num = 1;
-      (read_length = string_buff_reset_gzreadline(events_line, events_file)) > 0;
+      (read_length = strbuf_reset_gzreadline(events_line, events_file)) > 0;
       line_num++)
   {
-    string_buff_chomp(events_line);
+    strbuf_chomp(events_line);
 
     // Look for two empty lines in a row to mark end of events input
     if(reading_from_stdin)
@@ -171,14 +171,15 @@ void load_all_events(gzFile* events_file, char reading_from_stdin)
     }
   }
 
-  string_buff_free(events_line);
+  strbuf_free(events_line);
 
   // Sort events
   qsort(event_positions, num_of_events, sizeof(long), cmp_long);
 }
 
+
 char parse_csv_line(char *line, long *start, long *end,
-                    char *file, unsigned long line_num)
+                    char *file_path, unsigned long line_num)
 {
   char* separator = strchr(line, ',');
   
@@ -190,8 +191,7 @@ char parse_csv_line(char *line, long *start, long *end,
   if(separator == NULL)
   {
     fprintf(stderr, "Error (file: %s line: %lu): no separator found "
-                    "(tab or comma only)\n",
-            objects_file_path, line_num);
+                    "(tab or comma only)\n", file_path, line_num);
     print_usage(NULL);
   }
 
@@ -239,17 +239,17 @@ unsigned long bin_search_nearest(long boundary)
 
 void run_through_objects(gzFile* objects_file)
 {
-  STRING_BUFFER* objects_line = string_buff_init(200);
+  StrBuf* objects_line = strbuf_init(200);
 
   t_buf_pos read_length;
   unsigned long line_num;
   char seen_header = 0;
 
   for(line_num = 1;
-      (read_length = string_buff_reset_gzreadline(objects_line, objects_file)) > 0;
+      (read_length = strbuf_reset_gzreadline(objects_line, objects_file)) > 0;
       line_num++)
   {
-    string_buff_chomp(objects_line);
+    strbuf_chomp(objects_line);
     //printf("reading objects %lu '%s'\n", read_length, objects_line->buff);
 
     // Check if comment line
@@ -387,7 +387,7 @@ void run_through_objects(gzFile* objects_file)
     } // if(!comment && !whitespace)
   } // loop over objects
 
-  string_buff_free(objects_line);
+  strbuf_free(objects_line);
 }
 
 int main(int argc, char* argv[])

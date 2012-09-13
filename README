@@ -15,6 +15,12 @@ $ make DEBUG=1
 
 $ ./density_around 100 200 objects.csv events.csv
 
+== Notes ==
+
+Convert ensGene.txt to .bed file:
+
+> awk '{print $3"\t"$5"\t"$6"\t"$4}' ensGene.txt > ensGene.bed
+
 == Development ==
 
 Short term goals
@@ -25,3 +31,4 @@ long term
   * sort start positions
   * sort end positions
   * binary search to find start position in both arrays when looping
+- probably not -- performance is very good

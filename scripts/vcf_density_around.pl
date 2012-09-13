@@ -6,18 +6,18 @@ use warnings;
 use FindBin;
 use lib $FindBin::Bin;
 
+use Cwd 'abs_path';
+use File::Basename;
+
 use File::Path qw(remove_tree); # rmdir for none-empty directories
 #use File::Path qw(rmtree); # rmdir for none-empty directories
 
 use VCFFile;
-use DensityAround;
 
 ## Prefs
 my $csvsep = ",";
-my $tmp_dir_base = "tmp_density";
-my $tmp_vcf_dir = "tmp_vcf";
-my $tmp_objects_dir = "tmp_obj";
-my $tmp_out_dir = "tmp_obj_vcf";
+my $density_cmd = dirname(abs_path($0))."/../density_around";
+my $tmp_dir_base = 'tmp';
 ##
 
 sub print_usage
@@ -27,25 +27,51 @@ sub print_usage
     print STDERR "Error: $err\n";
   }
 
-  print STDERR "Usage: ./vcf_density_around.pl <bin_size> <num_bins> " .
-               "<FILE_TYPE> <objects.txt> <chr_sizes.csv> <out.csv> [in.vcf]\n";
-  print STDERR "  VCF and objects file don't need to be sorted.  \n";
+  print STDERR "Usage: ./vcf_density_around2.pl [--lengths <in.csv>] <bin_size> <num_bins> " .
+                 "<out.csv> <objects.bed> [in.vcf]\n";
+  print STDERR "  Input files do not need to be sorted.  \n";
 
   exit;
 }
 
-if(@ARGV < 6 || @ARGV > 7)
+if(@ARGV == 0)
 {
   print_usage();
 }
 
-my $bin_size = shift;
-my $num_bins = shift;
-my $file_type = shift;
-my $objects_file = shift;
-my $chr_sizes_file = shift;
-my $out_csv = shift;
-my $vcf_file = shift;
+my $use_chrom_lengths = 0;
+my %chr_lengths = ();
+
+if($ARGV[0] =~ /^-?-l(engths)?$/i)
+{
+  shift;
+  my $file = shift;
+
+  open(FILE, $file) or die("Cannot read chr lengths from '$file'");
+
+  while(defined(my $line = <FILE>))
+  {
+    chomp($line);
+    my ($chr,$len) = split($csvsep,$line);
+    $chr_lengths{$chr} = $len;
+  }
+
+  close(FILE);
+
+  $use_chrom_lengths = 1;
+}
+
+# Get args
+my ($bin_size, $num_bins, $out_csv, $objects_bed, $vcf_file, $unused) = @ARGV;
+
+if(!defined($objects_bed))
+{
+  print_usage("Not enough arguments");
+}
+elsif(defined($unused))
+{
+  print_usage("Too many arguments");
+}
 
 if($bin_size !~ /\d+/)
 {
@@ -56,69 +82,8 @@ elsif($num_bins !~ /\d+/)
   print_usage("Invalid number of bins: +ve integers plz");
 }
 
-my $file_codes_hash = get_file_codes_hash();
-my $file_codes_hash_ss = get_file_codes_hash_ss();
-$file_type = uc($file_type);
-my $file_code = $file_codes_hash->{$file_type};
-my $single_stranded = 0;
-
-if(!defined($file_code))
-{
-  $file_code = $file_codes_hash_ss->{$file_type};
-  $single_stranded = 1;
-}
-
-if(!defined($file_code))
-{
-  my @codes = (keys %$file_codes_hash, keys %$file_codes_hash_ss);
-  print_usage("FILE_TYPE not one of (" . join(", ", @codes) . ")");
-}
-
 #
-# Create tmp directory
-#
-my $tmp_dir = $tmp_dir_base;
-my $created_tmp_dir = 0;
-
-if(-e $tmp_dir)
-{
-  for(my $i = 1; ; $i++)
-  {
-    if(-e $tmp_dir)
-    {
-      $tmp_dir = $tmp_dir_base."_".$i;
-    }
-    else
-    {
-      mkdir($tmp_dir);
-      $created_tmp_dir = 1;
-      last;
-    }
-  }
-}
-else
-{
-  mkdir($tmp_dir);
-  $created_tmp_dir = 1;
-}
-
-if(!$created_tmp_dir)
-{
-  print_usage("Many tmp directories already exist: '$tmp_dir..'");
-}
-
-#
-# Create output dirs
-#
-$tmp_vcf_dir = $tmp_dir."/".$tmp_vcf_dir;
-$tmp_objects_dir = $tmp_dir."/".$tmp_objects_dir;
-$tmp_out_dir = $tmp_dir."/".$tmp_out_dir;
-mkdir($tmp_vcf_dir) or die("Cannot create dir '$tmp_vcf_dir'");
-mkdir($tmp_objects_dir) or die("Cannot create dir '$tmp_objects_dir'");
-mkdir($tmp_out_dir) or die("Cannot create dir '$tmp_out_dir'");
-
-#
-# Open VCF Handle
+# Open VCF handle (do this first in case it fails)
 #
 my $vcf_handle;
 
@@ -138,116 +103,294 @@ else
 
 my $vcf = new VCFFile($vcf_handle);
 
-# Load chromosome sizes
-my $chr_sizes = load_chr_sizes($chr_sizes_file);
-my @chroms = sort {$a cmp $b} keys %$chr_sizes;
+#
+# Create tmp directory
+#
+my $tmp_dir = $tmp_dir_base;
+my $created_tmp_dir = 0;
+
+# 20 attempts
+for(my $i = 1; $i < 20; $i++)
+{
+  $tmp_dir = $tmp_dir_base."_".int(rand()*1000000);
+
+  if(!(-e $tmp_dir))
+  {
+    mkdir($tmp_dir) or die("Cannot create directory '$tmp_dir'");
+    $created_tmp_dir = 1;
+    last;
+  }
+}
+
+if(!$created_tmp_dir)
+{
+  print_usage("Many tmp directories already exist beginning with '$tmp_dir'");
+}
 
 #
-# Split objects file into separate chromosomes and strands
+# Create output sub-directories
 #
-my $obj_handle;
-open($obj_handle, $objects_file)
-  or die("Cannot open objects file '$objects_file'\n");
+my $tmp_vcf_dir = $tmp_dir."/vcf/";
+my $tmp_objects_dir = $tmp_dir."/obj/";
+my $tmp_out_dir = $tmp_dir."/out/";
 
-print "Dumping object coordinates..\n";
+mkdir($tmp_vcf_dir) or die("Cannot create dir '$tmp_vcf_dir'");
+mkdir($tmp_objects_dir) or die("Cannot create dir '$tmp_objects_dir'");
+mkdir($tmp_out_dir) or die("Cannot create dir '$tmp_out_dir'");
 
-dump_object_positions($file_code, $obj_handle, $tmp_objects_dir,
-                      $chr_sizes, $csvsep);
+#
+# 1) Create .csv files for each chrom from object bed files
+#
 
-close($obj_handle);
+print "Dumping object positions..\n";
 
-# Split up VCF file
+my $bed_line;
+open(BED, $objects_bed) or die("Cannot open objects file '$objects_bed'");
+
+my %object_chr_to_handle = ();
+
+while(defined($bed_line = <BED>))
+{
+  chomp($bed_line);
+
+  my ($bed_chrom, $bed_start, $bed_end, $bed_strand) = split("\t", $bed_line);
+
+  if(!defined($bed_end))
+  {
+    die("Bed file line too short $bed_line");
+  }
+
+  my $key = $bed_chrom;
+
+  if(!defined($bed_strand))
+  {
+    $bed_strand = '+';
+  }
+
+  if($bed_strand eq '+')
+  {
+    $key .= '_forward';
+  }
+  elsif($bed_strand eq '-')
+  {
+    $key .= '_reverse';
+    ($bed_start, $bed_end) = (-$bed_end, -$bed_start);
+  }
+  else
+  {
+    die("Bed file: don't understand line '$bed_line'");
+  }
+
+  if(!defined($object_chr_to_handle{$key}))
+  {
+    my $file = $tmp_objects_dir.$key;
+
+    open($object_chr_to_handle{$key}, ">$file") or die("Cannot open '$file'");
+  }
+
+  my $fh = $object_chr_to_handle{$key};
+  print $fh $bed_start.$csvsep.$bed_end."\n";
+}
+
+# Close handles
+for my $handle (values %object_chr_to_handle)
+{
+  close($handle);
+}
+
+close(BED);
+
+#
+# 2) Create .csv files for each chrom from variants
+#
+
 print "Dumping VCF positions..\n";
-vcf_dump_positions($vcf, $tmp_vcf_dir, $chr_sizes, $single_stranded);
-close($vcf_handle);
+
+my %vcf_chr_to_handle = ();
+
+while(defined(my $vcf_entry = $vcf->read_entry()))
+{
+  my $chr = $vcf_entry->{'CHROM'};
+
+  if(!defined($vcf_chr_to_handle{$chr.'_forward'}))
+  {
+    my @file_names = ($chr.'_forward',$chr.'_reverse');
+
+    for my $file_name (@file_names)
+    {
+      my $file = $tmp_vcf_dir.'/'.$file_name;
+
+      open($vcf_chr_to_handle{$file_name}, ">$file")
+        or die("Cannot open file '$file'");
+    }
+  }
+
+  #my $handle = $chr_to_handle{$chr};
+  my $fh_fw = $vcf_chr_to_handle{$chr.'_forward'};
+  my $fh_rv = $vcf_chr_to_handle{$chr.'_reverse'};
+
+  print $fh_fw $vcf_entry->{'POS'}."\n";
+  print $fh_rv (-$vcf_entry->{'POS'})."\n";
+}
+
+# Close handles
+for my $handle (values %vcf_chr_to_handle)
+{
+  close($handle);
+}
+
+$vcf->close_vcf();
 
 # Now run density around
-my @resulting_chroms = ();
 
-if($single_stranded)
+print "Getting density around...\n";
+
+for my $chrom_and_dir (keys %vcf_chr_to_handle)
 {
-  for my $chrom (@chroms)
-  {
-    my $events_file = $tmp_vcf_dir."/vcf_".$chrom.".csv";
-    my $objects_file = $tmp_objects_dir."/obj_".$chrom.".csv";
-    my $counts_out = $tmp_out_dir."/".$chrom.".out";
-  
-    if(-e $events_file && -e $objects_file)
-    {
-      density_around($events_file, $objects_file, $bin_size, $num_bins,
-                     $chr_sizes->{$chrom}, $counts_out);
+  my $events_file = $tmp_vcf_dir.$chrom_and_dir;
+  my $objects_file = $tmp_objects_dir.$chrom_and_dir;
 
-      push(@resulting_chroms, $chrom);
+  my $counts_out = $tmp_out_dir.$chrom_and_dir.".out";
+
+  # Resolve chrom start/end
+  my ($chrom_start, $chrom_end);
+
+  if($use_chrom_lengths)
+  {
+    my ($chr,$dir) = ($chrom_and_dir =~ /^(.*)(_forward|_reverse)$/);
+
+    if(!defined($chr_lengths{$chr}))
+    {
+      print STDERR "Missing chr length: $chr\n";
+    }
+    else
+    {
+      $chrom_start = 1;
+      $chrom_end = $chr_lengths{$chr};
+
+      if($dir eq "_reverse")
+      {
+        ($chrom_start, $chrom_end) = (-$chrom_end, -$chrom_start);
+      }
     }
   }
-}
-else
-{
-  for my $chrom (@chroms)
+
+  if(-e $events_file && -e $objects_file)
   {
-    my $events_file_fw = $tmp_vcf_dir."/vcf_".$chrom."_fw.csv";
-    my $objects_file_fw = $tmp_objects_dir."/obj_".$chrom."_fw.csv";
-    my $counts_out_fw = $tmp_out_dir."/".$chrom."_fw.out";
-
-    my $events_file_rv = $tmp_vcf_dir."/vcf_".$chrom."_rv.csv";
-    my $objects_file_rv = $tmp_objects_dir."/obj_".$chrom."_rv.csv";
-    my $counts_out_rv = $tmp_out_dir."/".$chrom."_rv.out";
-
-    if(-e $events_file_fw && -e $objects_file_fw &&
-       -e $events_file_rv && -e $objects_file_rv)
-    {
-      density_around($events_file_fw, $objects_file_fw, $bin_size, $num_bins,
-                     $chr_sizes->{$chrom}, $counts_out_fw);
-
-      density_around($events_file_rv, $objects_file_rv, $bin_size, $num_bins,
-                     $chr_sizes->{$chrom}, $counts_out_rv);
-  
-      push(@resulting_chroms, $chrom);
-    }
+    density_around($events_file, $objects_file, $counts_out,
+                   $bin_size, $num_bins,
+                   $chrom_start, $chrom_end);
   }
 }
-
-print "Chromosomes: " . join(", ", @resulting_chroms) . "\n";
 
 # Now merge
 my @merge_files;
 
-if($single_stranded)
+opendir(DIR, $tmp_out_dir);
+my @output_files = grep {$_ =~ /\.out$/} readdir(DIR);
+closedir(DIR);
+
+if(@output_files > 0)
 {
-  @merge_files = map {$tmp_out_dir."/".$_.".out"} @resulting_chroms;
+  print "Merging results into file '$out_csv'...\n";
+
+  @output_files = map {$tmp_out_dir.$_} @output_files;
+
+  my $handle;
+  open($handle, ">$out_csv") or die("Cannot open file '$out_csv'\n");
+  merge_csvs($handle, @output_files);
+  close($handle);
 }
 else
 {
-  @merge_files = ((map {$tmp_out_dir."/".$_."_fw.out"} @resulting_chroms),
-                  (map {$tmp_out_dir."/".$_."_rv.out"} @resulting_chroms));
+  print "No results :-(\n";
 }
-
-my @columns = ("pos");
-
-for my $chr (@resulting_chroms)
-{
-  if($single_stranded)
-  {
-    push(@columns, $chr.".counts", $chr.".densities");
-  }
-  else
-  {
-    push(@columns, $chr.".fw.counts", $chr.".fw.densities");
-    push(@columns, $chr.".rv.counts", $chr.".rv.densities");
-  }
-}
-
-my $handle;
-
-print "Merging results into file '$out_csv'...\n";
-
-open($handle, ">$out_csv") or die("Cannot open file $out_csv\n");
-
-merge_output_csvs($handle, $csvsep, \@columns, @merge_files);
-close($handle);
 
 print "Removing temp directory '$tmp_dir'...\n";
-
 remove_tree($tmp_dir) or die("Couldn't remove tmp directory");
 
 print "Done!\n";
+
+
+sub density_around
+{
+  my ($events_file, $objects_file, $counts_out, $bin_size, $num_bins,
+      $chrom_start, $chrom_end) = @_;
+
+  my $cmd = "$density_cmd";
+
+  if(defined($chrom_start))
+  {
+    $cmd .= " --density $chrom_start $chrom_end";
+  }
+
+  $cmd .= " $bin_size $num_bins \"$events_file\" \"$objects_file\" \"$counts_out\"";
+
+  #print "$cmd\n";
+
+  `$cmd`;
+}
+
+sub merge_csvs
+{
+  my ($out_handle, $first_file, @csv_files) = @_;
+
+  my @row_names = ();
+  my @counts = ();
+  my @densities = ();
+
+  print "merge_csvs: '$first_file'\n";
+
+  open(FILE, $first_file) or die("Cannot open file '$first_file'");
+
+  while(defined(my $line = <FILE>))
+  {
+    chomp($line);
+    my ($row, $value, $density) = split($csvsep, $line);
+    push(@row_names, $row);
+    push(@counts, $value);
+
+    if(defined($density))
+    {
+      push(@densities, $density);
+    }
+  }
+
+  close(FILE);
+
+  for my $file (@csv_files)
+  {
+    open(FILE, $file) or die("Cannot open file '$file'");
+
+    for(my $i = 0; defined(my $line = <FILE>); $i++)
+    {
+      my ($row, $value, $density) = split($csvsep, $line);
+      $counts[$i] += $value;
+
+      if(defined($density))
+      {
+        $densities[$i] += $density;
+      }
+    }
+
+    close(FILE);
+  }
+
+  # Print merge csv header
+  if($use_chrom_lengths)
+  {
+    # Density is the number of times we have seen a bin
+    print $out_handle join($csvsep, 'bin', 'count', 'density')."\n";
+  }
+  else
+  {
+    print $out_handle join($csvsep, 'bin', 'count')."\n";
+  }
+
+  for(my $i = 0; defined($counts[$i]); $i++)
+  {
+    print $out_handle $row_names[$i] . $csvsep . $counts[$i] .
+                      (defined($densities[$i]) ? $csvsep.$densities[$i] : '') .
+                      "\n";
+  }
+}

@@ -6,8 +6,8 @@ use strict;
 use File::Path qw(mkpath);
 
 my $density_cmd = "~/c/density_around/scripts/vcf_density_around.pl";
-my $filter_info_cmd = "~/perl/vcf_scripts/vcf_filter_by_info.pl";
-my $filter_slippage_cmd = "~/perl/vcf_scripts/vcf_filter_slippage.pl";
+my $filter_info_cmd = "~/bioinf-perl/vcf_scripts/vcf_filter_by_info.pl";
+my $filter_slippage_cmd = "~/bioinf-perl/vcf_scripts/vcf_filter_slippage.pl";
 
 my @bin_sizes = (100, 1000);
 my @bin_numbers = (200, 200);
@@ -61,7 +61,8 @@ for(my $b = 0; $b < @bin_sizes; $b++)
   run_cmd($bin_size, $num_bins);
 
   # 1=>slippage, 2=>no slippage, 3=>both
-  for my $slippage (1,2,3)
+  my @slippage_states = $is_snps ? (3) : (1,2,3);
+  for my $slippage (@slippage_states)
   {
     # With no polarity
     run_cmd($bin_size, $num_bins, $slippage);

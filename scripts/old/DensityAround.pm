@@ -182,7 +182,65 @@ sub vcf_dump_positions
   return sort {$a cmp $b} keys %chrs;
 }
 
-sub dump_recomb_positions
+sub dump_hotspot_positions2
+{
+  my ($filetype, $handle, $out_dir, $chr_sizes, $csvsep) = @_;
+
+  if($filetype != HOTSPOT_FILE && $filetype != COLDSPOT_FILE)
+  {
+    die("Not hotspot or coldspot file type! ($filetype)\n");
+  }
+
+  my $line;
+  my $curr_chrom = "";
+  my $obj_handle;
+
+  my %chrs = ();
+
+  while(defined($line = <$handle>))
+  {
+    my @cols = split(/\t/, $line);
+
+    my $chr = _get_chr_name($cols[0]);
+    my $start = $cols[1];
+    my $end = $cols[2];
+
+    if(!defined($chr_sizes->{$chr}))
+    {
+      # Ignore, warn or freak out and die
+      #print STDERR "Chrom size not given for '$chr'\n";
+      #die("Chrom size not given for '$chr'\n");
+      next;
+    }
+
+    if($chr ne $curr_chrom)
+    {
+      $curr_chrom = $chr;
+      $chrs{$curr_chrom} = 1;
+
+      if(defined($obj_handle))
+      {
+        close($obj_handle);
+      }
+
+      my $file = $out_dir."/obj_".$curr_chrom.".csv";
+      #print "opening '$file'\n";
+      #exit;
+      open($obj_handle, ">$file") or die("Cannot open '$file'\n");
+    }
+
+    print $obj_handle $start.$csvsep.$end."\n";
+  }
+
+  if(defined($obj_handle))
+  {
+    close($obj_handle);
+  }
+
+  return sort {$a cmp $b} keys %chrs;
+}
+
+sub dump_hotspot_positions
 {
   my ($filetype, $handle, $out_dir, $chr_sizes, $csvsep) = @_;
 
@@ -282,8 +340,10 @@ sub dump_object_positions
 
   if($filetype == COLDSPOT_FILE || $filetype == HOTSPOT_FILE)
   {
-    return dump_recomb_positions($filetype, $handle, $out_dir,
-                                 $chr_sizes, $csvsep);
+    #return dump_hotspot_positions($filetype, $handle, $out_dir,
+    #                              $chr_sizes, $csvsep);
+    return dump_hotspot_positions2($filetype, $handle, $out_dir,
+                                   $chr_sizes, $csvsep);
   }
   elsif(!(grep {$_ == $filetype} values %file_types))
   {
