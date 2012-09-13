@@ -328,7 +328,7 @@ sub density_around
 
   #print "$cmd\n";
 
-  `$cmd`;
+  `$cmd` or die("Cannot exec: `$cmd`");
 }
 
 sub merge_csvs
