@@ -16,12 +16,26 @@ echo "  Out CSV base: $out_csv_base"
 BIONINF_PATH=~/bioinf-perl
 DENSITY_PATH=~/c/density_around
 
+# SNPs
+csv_file=$out_csv_base"."$num_of_bins"bins."$bin_size"width.snps.csv"
+
+$BIONINF_PATH/vcf_scripts/vcf_filter_variants.pl SNP $vcf_file | \
+$DENSITY_PATH/scripts/vcf_density_around.pl --lengths $chrom_sizes_file $num_of_bins $bin_size $csv_file $bed_file || { echo 'Error' ; exit 1; }
+
+# Insertions
 for i in {1..10}
 do
-  $BIONINF_PATH/vcf_scripts/vcf_filter_ins_del.pl +$i $vcf_file | $DENSITY_PATH/scripts/vcf_density_around.pl --lengths $chrom_sizes_file $num_of_bins $bin_size $out_csv_base"."$i""ins.csv $bed_file || { echo 'Error' ; exit 1; }
+  csv_file=$out_csv_base"."$num_of_bins"bins."$bin_size"width."$i"ins.csv"
+
+  $BIONINF_PATH/vcf_scripts/vcf_filter_ins_del.pl +$i $vcf_file | \
+  $DENSITY_PATH/scripts/vcf_density_around.pl --lengths $chrom_sizes_file $num_of_bins $bin_size $csv_file $bed_file || { echo 'Error' ; exit 1; }
 done
 
-for i in {1..10};
+# Deletions
+for i in {1..10}
 do
-  $BIONINF_PATH/vcf_scripts/vcf_filter_ins_del.pl -$i $vcf_file | $DENSITY_PATH/scripts/vcf_density_around.pl --lengths $chrom_sizes_file $num_of_bins $bin_size $out_csv_base"."$i""del.csv $bed_file; || { echo 'Error' ; exit 1; }
+  csv_file=$out_csv_base"."$num_of_bins"bins."$bin_size"width."$i"del.csv"
+
+  $BIONINF_PATH/vcf_scripts/vcf_filter_ins_del.pl -$i $vcf_file | \
+  $DENSITY_PATH/scripts/vcf_density_around.pl --lengths $chrom_sizes_file $num_of_bins $bin_size $csv_file $bed_file || { echo 'Error' ; exit 1; }
 done
