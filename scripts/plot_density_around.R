@@ -16,6 +16,13 @@ set_pars = function()
 
 plot_around = function(file,title,xaxis,yaxis,out_file,do_rates=F)
 {
+  cat("file='",file,"'\n",sep='');
+  cat("title='",title,"'\n",sep='');
+  cat("xaxis='",xaxis,"'\n",sep='');
+  cat("yaxis='",yaxis,"'\n",sep='');
+  cat("out_file='",out_file,"'\n",sep='');
+  cat("do_rates=",do_rates,"\n",sep='');
+
   # Check path to out_file exists
   out_dir=dirname(out_file);
   if(!file.exists(out_dir)) {
@@ -28,13 +35,16 @@ plot_around = function(file,title,xaxis,yaxis,out_file,do_rates=F)
   pdf(file=out_file, width=12, height=6);
   set_pars();
 
+  bins_before_zero = data[,'bin'] < 0;
+  bins_after_zero = data[,'bin'] > 0;
+
   if(do_rates)
   {
-    field='rate'
-    ybounds=c(0,max(data[,field]));
-
     data[,'rate'] = data[,'count'] / data[,'density'];
     #data[,'rate'] = (data[,'count'] * rate_per) / (bin_width * data[,'density']);
+
+    field='rate'
+    ybounds=c(0,max(data[,field]));
   }
   else
   {
