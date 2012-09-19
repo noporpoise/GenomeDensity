@@ -9,8 +9,8 @@ use lib $FindBin::Bin;
 use Cwd 'abs_path';
 use File::Basename;
 
-use File::Path qw(remove_tree); # rmdir for none-empty directories
-#use File::Path qw(rmtree); # rmdir for none-empty directories
+use File::Path qw(mkpath remove_tree); # recursive mkdir/rmdir
+#use File::Path qw(rmtree);
 
 use VCFFile;
 
@@ -27,7 +27,7 @@ sub print_usage
     print STDERR "Error: $err\n";
   }
 
-  print STDERR "Usage: ./vcf_density_around2.pl [--lengths <in.csv>] <bin_size> <num_bins> " .
+  print STDERR "Usage: ./vcf_density_around.pl [--lengths <in.csv>] <bin_size> <num_bins> " .
                  "<out.csv> <objects.bed> [in.vcf]\n";
   print STDERR "  Input files do not need to be sorted.  \n";
 
@@ -63,6 +63,10 @@ if($ARGV[0] =~ /^-?-l(engths)?$/i)
 
 # Get args
 my ($bin_size, $num_bins, $out_csv, $objects_bed, $vcf_file, $unused) = @ARGV;
+
+print "./vcf_density_around.pl:\n";
+print "  bin_size: $bin_size; num_bins: $num_bins; out_csv: $out_csv;\n";
+print "  objects_bed: $objects_bed; vcf_file: ". (defined($vcf_file) ? $vcf_file : "")."\n";
 
 if(!defined($objects_bed))
 {
@@ -102,6 +106,17 @@ else
 }
 
 my $vcf = new VCFFile($vcf_handle);
+
+#
+# Check path to csv exists
+#
+
+my $csv_dir = dirname($out_csv);
+
+if(!(-e $csv_dir))
+{
+  mkpath($csv_dir) or die("Cannot make path to CSV: $csv_dir");
+}
 
 #
 # Create tmp directory
